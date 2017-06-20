@@ -42,7 +42,7 @@ linear_regulation_ode_func <- function(time, regulator_expression ) {
   regulator_fun = approxfun(time, regulator_expression,method = "linear", rule = 2);
   return(function(t, state, parms) {
       dY = parms["w"] * regulator_fun(t) - parms["decay"] * state["y"];
-      list(dX);
+      list(dY);
   })
 }
 
@@ -51,15 +51,20 @@ simulate_linear <- function(num_cells, num_time, w = runif(1, 0.1, 3), decay = r
   target_expression = array(0, c(num_cells, num_time));
   ode_params = c(w = w, decay = decay);
   for(cell in 1:num_cells) {
-    regulator_expression[cell,] = generate_random_profile(0:(num_time - 1),scale = 3, length = 2)
-    ode_state = c(y = runif(1,0,1))
-    ode_func = linear_regulation_ode_func(0:(num_time - 1), regulator_expression[cell,])
-    target_expression[cell,] = ode(ode_state, times = 0:(num_time - 1), ode_func, method = "ode45")
+    for(time in 1:num_time) {
+      regulator_profile = generate_random_profile(0:(num_time - 1),scale = 3, length = 2)
+      ode_state = c(y = runif(1,0,1))
+      ode_func = linear_regulation_ode_func(0:(num_time - 1), regulator_profile)
+      ode_result = ode(y = ode_state, times = 0:(num_time - 1), func = ode_func, parms = ode_params,method = "ode45")
+      target_expression[cell, time] = ode_result[time,"y"]
+      regulator_expression[cell, time] = regulator_profile[time]
+    }
   }
   return(list(observed =
                 list(
                   num_cells = num_cells,
                   num_samples = num_time,
+                  bandwidth = 0.2,
                   regulator_expression = regulator_expression,
                   target_expression = target_expression
                 ),
