@@ -1,0 +1,45 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(rstan)
+library(deSolve)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
+
+```{r}
+time = 0:10;
+test_profile = generate_random_profile(time, 1, 1, TRUE);
+bandwidth = 0.5;
+smoothed_profile = array(0, length(time));
+for(i in 1:length(time)) {
+  distances = time - time[i];
+  weights = exp(-0.5 * (distances / bandwidth) ^ 2)
+  smoothed_profile[i] = sum(test_profile * weights) / sum(weights)
+}
+plot(time, test_profile)
+lines(time, smoothed_profile)
+```
+
+
+```{r}
+#d = simulate_linear_circular(100, w = 0.3, decay=0.3)
+d = simulate_linear_circular(100, w = 1, decay=0.3, min_time = 5, max_time = 8)
+fit = stan("linear-steady.stan", data = d$observed)
+summary(fit)$summary
+```
+
+```{r}
+dd = simulate_linear_circular_2(30, 10, 3, 2)
+fit = stan("linear-circular.stan", data = dd$observed)
+hist(summary(fit)$summary[,"Rhat"])
+evaluation_summary(extract(fit), dd$true)
+```
+
