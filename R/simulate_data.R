@@ -124,13 +124,13 @@ simulate_linear_circular <- function(num_cells, min_time = 5, max_time = 10, w =
   ))
 }
 
-simulate_linear_circular_2 <- function(num_cells, num_time, scale, length, w = runif(1, 0.1, 3), decay = runif(1, 0.1, 1)) {
+simulate_linear_circular_2 <- function(num_cells, num_time, scale, gp_length, w = runif(1, 0.1, 3), decay = runif(1, 0.1, 1)) {
 
   time_points = runif(num_cells,0,1);
   time = time_points * (num_time - 1);
 
   repeat {
-    regulator_profile = array(generate_random_profile(1:num_time, scale, length, periodic = TRUE, period = num_time - 1), num_time);
+    regulator_profile = array(generate_random_profile(1:num_time, scale, gp_length, periodic = TRUE, period = num_time - 1), num_time);
     if(var(regulator_profile) > 1) {
       break;
     }
@@ -156,17 +156,18 @@ simulate_linear_circular_2 <- function(num_cells, num_time, scale, length, w = r
   target_expression[target_expression < 0] = 0;
 
   regulator_expression_true = approx(0:(num_time - 1), regulator_profile, time, method = "linear", rule = 2)$y
-  regulator_expression = rnorm(num_cells, regulator_expression_true, expression_sigma);
+  regulator_expression = regulator_expression_true #rnorm(num_cells, regulator_expression_true, expression_sigma);
+  regulator_expression[regulator_expression < 0] = 0;
 
   return(list(observed =
                 list(
                   num_cells = num_cells,
                   num_time = num_time,
-                  bandwidth = 0.1,
+                  bandwidth = 0.5,
                   regulator_expression = regulator_expression,
                   target_expression = target_expression,
                   gp_sigma = scale,
-                  gp_length = length,
+                  gp_length = gp_length,
                   expression_sigma = expression_sigma,
                   w = w,
                   decay = decay,
@@ -199,12 +200,4 @@ simulate_linear_circular_2 <- function(num_cells, num_time, scale, length, w = r
                 )
   ))
 
-}
-
-simulate_gp_test <- function(num_cells, num_time, gp_sigma) {
-  full_expression = array(0, c(num_time, num_cells));
-  time = seq(0,1, by = 1/(num_time - 1))
-  for(cell in 1:num_cells) {
-    full_expression[, cell] = generate_random_profile(time, gp_sigma, 1);
-  }
 }

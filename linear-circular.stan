@@ -25,34 +25,33 @@ data {
 
 }
 
-transformed data {
-  matrix[num_time,num_time] cov_m;
-  matrix[num_time,num_time] cov_m_chol;
-  vector[num_time] times;
 
-  for(i in 1:num_time) {
-    cov_m[i,i] = square(gp_sigma) + 0.000001;
-    for(j in 1:num_time) {
-      real  covariance = square(gp_sigma) * exp(-2* square(sin(pi() * abs(i - j) / num_time)) / square(gp_length));
-      cov_m[i,j] = covariance;
-      cov_m[j,i] = covariance;
-    }
+transformed data {
+  vector[num_cells] zeroes;
+    vector[num_time] times;
+
+  for(i in 1:num_cells){
+    zeroes[i] = 0;
   }
-  cov_m_chol = cholesky_decompose(cov_m);
 
   for(i in 1:num_time) {
     times[i] = i - 1;
   }
+
 }
 
+
 parameters {
-  vector[num_time] regulator_profile_raw;
   vector<lower = 0, upper = 1>[num_cells] time_position;
 }
 
 transformed parameters {
-  vector[num_time] regulator_profile = log1p_exp(cov_m_chol * regulator_profile_raw);
+  vector[num_time] regulator_profile;
   vector[num_time] target_profile;
+
+  for(t in 1:num_time) {
+    regulator_profile[t] = kernel_estimate(t, time_position * (num_time - 1), regulator_expression, inv(num_time - 1));
+  }
 
   //gene RNA synthesis
   { //new scope to make the variables local
@@ -74,21 +73,44 @@ transformed parameters {
       }
     }
   }
+
+
+
 }
 
 model {
-  vector[num_cells] predicted_regulator;
   vector[num_cells] predicted_target;
 
   for(c in 1:num_cells) {
     real time_value = time_position[c] * (num_time - 1);
-    predicted_regulator[c] = kernel_estimate(time_value, times, regulator_profile, bandwidth);
     predicted_target[c] = kernel_estimate(time_value, times, regulator_profile, bandwidth);
   }
 
-  regulator_expression ~ normal_lpdf(predicted_regulator, expression_sigma);
   target_expression ~ normal_lpdf(predicted_target, expression_sigma);
-  regulator_profile_raw ~ normal(0,1);
+
+  {
+    matrix[num_cells,num_cells] cov_m;
+    //matrix[num_cells,num_cells] cov_m_chol;
+    vector[num_cells] inverse_transformed_regulator;
+    for(i in 1:num_cells) {
+      inverse_transformed_regulator[i] = log_diff_exp(regulator_expression[i], 0); //stands for ln(e^x - 1)
+    }
+
+    for(i in 1:num_cells) {
+      cov_m[i,i] = square(gp_sigma) + 0.000001;
+      for(j in 1:num_cells) {
+        real dist = fabs(time_position[i] - time_position[j]);
+        real  covariance = square(gp_sigma) * exp(-2* square(sin(pi() * dist)) / square(gp_length));
+        cov_m[i,j] = covariance;
+        cov_m[j,i] = covariance;
+      }
+    }
+    //cov_m_chol = cholesky_decompose(cov_m);
+
+    target += multi_normal_lpdf(inverse_transformed_regulator | zeroes, cov_m);
+    target += regulator_expression - inverse_transformed_regulator; //the log Jacobian of ln(e^x - 1)
+  }
+
   // time_position; is explicitly uniform, no prior here
 }
 
