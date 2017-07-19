@@ -1,5 +1,14 @@
 require(deSolve)
 
+gp_covariance <- function(distance, gp_scale, gp_length, periodic = FALSE, period = 1) {
+  if(periodic) {
+    return((gp_scale^2) * exp(-2*(sin(3.141592 * abs(distance) / period)^2) / (gp_length ^ 2)))
+  } else {
+    return((gp_scale^2) * exp( (-0.5 / (gp_length ^ 2)) * (distance ^ 2) ));
+  }
+
+}
+
 generate_random_profile <- function(time, scale, length, mean_func = 0, periodic = FALSE, period = 1) {
   # Construct the squared exponential covariance matrix
   cov_matrix = array(0,c(length(time), length(time)));
@@ -10,11 +19,7 @@ generate_random_profile <- function(time, scale, length, mean_func = 0, periodic
     if (i < length(time)) {
       for(j in (i+1):length(time)) {
         distance = (time[i] - time[j])
-        if(periodic) {
-          covariance = (scale^2) * exp(-2*(sin(3.141592 * abs(distance) / period)^2) / (length ^ 2))
-        } else {
-          covariance = (scale^2) * exp( (-0.5 / (length ^ 2)) * (distance ^ 2) );
-        }
+        covariance = gp_covariance(distance, scale, length, periodic, period)
         cov_matrix[i,j] = covariance
         cov_matrix[j,i] = covariance
       }
@@ -124,14 +129,14 @@ simulate_linear_circular <- function(num_cells, min_time = 5, max_time = 10, w =
   ))
 }
 
-simulate_linear_circular_2 <- function(num_cells, num_time, scale, gp_length, w = runif(1, 0.1, 3), decay = runif(1, 0.1, 1)) {
+simulate_linear_circular_2 <- function(num_cells, num_time, scale, gp_length, w = runif(1, 0.1, 3), decay = runif(1, 0.1, 1), min_variance = 1) {
 
   time_points = runif(num_cells,0,1);
   time = time_points * (num_time - 1);
 
   repeat {
     regulator_profile = array(generate_random_profile(1:num_time, scale, gp_length, periodic = TRUE, period = num_time - 1), num_time);
-    if(var(regulator_profile) > 1) {
+    if(var(regulator_profile) > min_variance) {
       break;
     }
   }
@@ -200,4 +205,98 @@ simulate_linear_circular_2 <- function(num_cells, num_time, scale, gp_length, w 
                 )
   ))
 
+}
+
+generate_random_2d_field <- function(grid_x, grid_y, gp_scale, gp_length) {
+  total_points = length(grid_x) * length(grid_y)
+  cov_matrix = array(NA, c(total_points,total_points))
+  for(x1 in 1:length(grid_x)) {
+    for(y1 in 1:length(grid_y)) {
+      coord1 = (x1 - 1) * length(grid_y) + y1
+      cov_matrix[coord1, coord1] = gp_scale ^ 2 + 1e-6
+      for(x2 in 1:length(grid_x)) {
+        for(y2 in 1:length(grid_y)) {
+          coord2 = (x2 - 1) * length(grid_y) + y2
+          if(coord2 > coord1) {
+            distance = sqrt((x1-x2) ^ 2 + (y1 - y2) ^ 2)
+            covariance = gp_covariance(distance, gp_scale, gp_length)
+            cov_matrix[coord1, coord2] = covariance
+            cov_matrix[coord2, coord1] = covariance
+          }
+        }
+      }
+    }
+  }
+  chol_cov = t(chol(cov_matrix));
+  flat_values = chol_cov %*% rnorm(total_points);
+
+  result = array(NA, c(length(grid_x),length(grid_y)))
+  for(x in 1:length(grid_x)) {
+    for(y in 1:length(grid_y)) {
+      coord = (x - 1) * length(grid_y) + y
+      result[x,y] = flat_values[coord]
+    }
+  }
+  return(result)
+}
+
+kernel_estimate_2d <- function(xs, ys, values, target_x, target_y, bandwidth) {
+  distances = sqrt((xs - target_x) ^ 2 + (ys - target_y) ^ 2)
+  weights = exp(-0.5 * (distances / bandwidth) ^ 2)
+  return(sum(weights * values) / sum(weights))
+}
+
+evolve_2d_field <- function(field, bandwidth, regulator_expression, target_expression, step) {
+  next_regulator = array(NA, length(regulator_expression))
+  next_target = array(NA, length(target_expression))
+  for(i in 1:length(regulator_expression)) {
+    regulator_change = kernel_estimate_2d(field$xs,field$ys, field$values, regulator_expression[i], target_expression[i], bandwidth)
+    next_regulator[i] = max(regulator_expression[i] + regulator_change, 0)
+
+    line_a = (next_regulator[i] - regulator_expression[i]) / step
+    line_b = regulator_expression[i]
+    integral_start = (line_b / field$decay) - (line_a / (field$decay ^ 2))
+    integral_end = exp(field$decay * step) * (  ( (line_a * step + line_b) / field$decay ) - (line_a / (field$decay ^ 2)))
+    next_target[i] = exp(-field$decay * step) * (target_expression[i] + field$w * (integral_end - integral_start))
+  }
+  return(list(regulator_expression = next_regulator, target_expression = next_target))
+}
+
+rotation_field <- function() {
+  coords = c(0.5,1.5,2.5)
+  list(xs = rep(coords, 3),
+       ys = c(rep(coords[1],3),rep(coords[2],3), rep(coords[3],3)),
+       values = c(1,    0.5, -0.1,
+                  -0.1, -0.5, -1,
+                  -0.3,   -0.8, -1.5),
+       w = 2,
+       decay = 0.8
+       )
+}
+
+visualize_field <- function(field, initial_pop, bandwidth, step, num_steps) {
+  index = 1:length(initial_pop$regulator_expression)
+  values = data.frame(reg = initial_pop$regulator_expression, target = initial_pop$target_expression,index = index)
+  values$step = 0
+  pop = initial_pop;
+  for(i in 1:num_steps) {
+    pop = evolve_2d_field(field, bandwidth, pop$regulator_expression,pop$target_expression, step)
+    new_step = data.frame(reg = pop$regulator_expression, target = pop$target_expression,index = index)
+    new_step$step = i
+    values = rbind(values, new_step)
+  }
+  ggplot(values, aes(x=reg, y = target, color = as.factor(index))) + scale_colour_discrete(labels=NULL, guide="none") + geom_path()
+}
+
+field_map <- function(field, bandwidth) {
+  grid_size = 0.1
+  grid_x = seq(min(field$xs) - 0.5, max(field$xs) + 0.5, by = grid_size)
+  grid_y = seq(min(field$ys) - 0.5, max(field$ys) + 0.5, by = grid_size)
+  regulator = crossing(reg = grid_x, target = grid_y) %>%
+    rowwise() %>% mutate(value = kernel_estimate_2d(field$xs,field$ys, field$values, reg, target, bandwidth))
+
+
+
+  ggplot(regulator, aes(x = reg, y = target, fill = value)) + geom_tile(size = grid_size) + scale_fill_gradient2() +
+  geom_abline(slope = field$w/field$decay , intercept = 0)
 }

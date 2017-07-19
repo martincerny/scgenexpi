@@ -83,7 +83,7 @@ model {
 
   for(c in 1:num_cells) {
     real time_value = time_position[c] * (num_time - 1);
-    predicted_target[c] = kernel_estimate(time_value, times, regulator_profile, bandwidth);
+    predicted_target[c] = kernel_estimate(time_value, times, target_profile, bandwidth);
   }
 
   target_expression ~ normal_lpdf(predicted_target, expression_sigma);

@@ -5,45 +5,6 @@ output: html_notebook
 
 
 ```{r}
-empirical_smooth_cdf_logit <- function(samples, slope, x) {
-  result = rep_len(0, length(x));
-  for(s in samples) {
-    entry = x - s
-    logistic = 1 / (1 + exp(-slope * entry));
-    result = result + logistic;
-  }
-  return(result / length(samples));
-} 
-
-empirical_smooth_cdf_normal <- function(samples, bandwidth, x) {
-  result = rep_len(0, length(x));
-  for(s in samples) {
-    result = result + pnorm(x, s, bandwidth);
-  }
-  return(result / length(samples));
-} 
-
-
-empirical_density_logit <- function(samples, slope, x) {
-  result = rep_len(0, length(x));
-  for(s in samples) {
-    entry = x - s
-    logistic = 1 / (1 + exp(-slope * entry));
-    add = logistic * (1 - logistic);
-    result = result + add;
-  }
-  return((result * slope) / length(samples));
-}
-
-empirical_density_normal <- function(samples, bandwidth, x) {
-  result = rep_len(0, length(x));
-  for(s in samples) {
-    result = result + dnorm(x, mean = s, sd = bandwidth);
-  }
-  return(result / length(samples));
-  
-}
-
 
 num_samples = 1000;
 samples_source = rbinom(num_samples, 1, 0.5);
@@ -62,5 +23,26 @@ plot(density_points, true_density(density_points), type = "l", col = "orange", m
 lines(density_points, empirical_density_logit(samples, slope, density_points), col="magenta")
 lines(density_points, empirical_density_normal(samples, bandwidth, density_points))
 
+```
+
+```{r}
+
+kernel_estimate <- function(time, value_times, values, bandwidth) {
+  result = array(0, length(time))
+  for(i in 1:length(time)) {
+    weights = exp(-0.5* (((value_times - time[i])  / bandwidth) ^ 2));
+    result[i] = sum(weights * values) / sum(weights);
+  }
+  return(result)
+}
+
+time = 1:10
+profile = generate_random_profile(time,3,1)
+points = seq(1,10, by = 0.1)
+linear = approx(time, profile, points)[["y"]]
+kernel = kernel_estimate(points, time, profile, 0.5)
+plot(time, profile)
+lines(points, linear, col = "orange")
+lines(points, kernel, col = "blue")
 ```
 
