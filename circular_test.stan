@@ -18,14 +18,6 @@ data {
 }
 
 transformed data {
-  vector<lower = 0>[num_integration_points] integration_times;
-  real integration_step = inv(num_integration_points - 1);
-  for(i in 1:num_integration_points) {
-    integration_times[i] = (i-1) * integration_step;
-  }
-  if(debug > 0) {
-    print(integration_times);
-  }
 }
 
 parameters {
@@ -35,37 +27,56 @@ parameters {
 }
 
 transformed parameters {
-  vector[num_integration_points] regulator_estimate;
-  vector[num_integration_points] integrated_values;
-  vector[num_cells] target_estimate;
-  real residual = 0;
-  real first_term;
+  vector<lower=0>[num_cells] regulator_estimate;
+  vector<lower=0>[num_cells] target_estimate;
 
-  integrated_values[1] = 0;
-  regulator_estimate[1] = kernel_estimate(integration_times[1], time_position, regulator_expression, regulator_bandwidth);
+  {
+    int ordering[num_cells];
+    real regulator_zero;
+    real integral;
 
-  first_term = 0.5 * regulator_estimate[1] * integration_step;
+    for(i in 1:num_cells) {
+      ordering[i] = i;
+    }
+    for(i in 1:num_cells) {
+      for(j in 2:num_cells) {
+        if(time_position[ordering[j - 1]] > time_position[ordering[j]]) {
+          int x = ordering[j];
+          ordering[j] = ordering[j - 1];
+          ordering[j - 1] = x;
+        }
+      }
+    }
 
-  for(i in 2:num_integration_points) {
-    regulator_estimate[i] = kernel_estimate(integration_times[i], time_position, regulator_expression, regulator_bandwidth);
-    {
-      real current_step = regulator_estimate[i] * integration_step;
-      integrated_values[i] = first_term + residual + 0.5 * current_step;
-      residual = residual + current_step;
+
+    for(c in 1:num_cells) {
+      regulator_estimate[c] = kernel_estimate(time_position[c], time_position, regulator_expression, regulator_bandwidth);
+    }
+    regulator_zero = 0;
+
+    integral = 0.5 * (regulator_estimate[ordering[1]] + regulator_zero) * time_position[ordering[1]];
+    target_estimate[ordering[1]] = integral;
+
+    for(i in 2:num_cells) {
+      {
+        int cell_i = ordering[i];
+        int cell_before = ordering[i-1];
+        integral = integral + 0.5 * (regulator_estimate[cell_i] + regulator_estimate[cell_before]) * (time_position[cell_i] - time_position[cell_before]);
+        target_estimate[cell_i] = integral;
+      }
+    }
+
+
+    if(debug > 0) {
+      print("Time: ", time_position)
+      print("Ordering: ", ordering)
+      print("Regulaotr: ", regulator_expression)
+      print("RegE: ", regulator_estimate)
+      print("Target: ", target_expression)
+      print("TargetE: ", target_estimate)
     }
   }
 
-  for(c in 1:num_cells) {
-    target_estimate[c] = kernel_estimate(time_position[c], integration_times, integrated_values, integrated_target_bandwidth);
-  }
-  if(debug > 0) {
-    print("Time: ", time_position)
-    print("Regulaotr: ", regulator_expression)
-    print("RegE: ", regulator_estimate)
-    print("Integrated: ", integrated_values)
-    print("TargetE: ", target_estimate)
-    print("Target: ", target_expression)
-  }
 }
 
 model {

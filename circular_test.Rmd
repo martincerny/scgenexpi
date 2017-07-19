@@ -10,7 +10,7 @@ options(mc.cores = parallel::detectCores())
 
 
 ```{r}
-num_cells = 20
+num_cells = 30
 w = 1
 sigma = 0.01
 time_position = runif(num_cells, 0, 1)
@@ -32,27 +32,32 @@ observed = list(num_cells = num_cells,
 observed$target_expression[observed$target_expression < 0] = 0
 observed$regulator_expression[observed$regulator_expression < 0] = 0
 
-fit = stan("circular_test.stan", data = observed)
+initf <- function() {
+  list(time_position = time_position)
+}
 
+
+#fit = stan("circular_test.stan", data = observed, control= list(adapt_delta = 0.9), init = initf, chains = 1, iter = 1)
+fit = stan("circular_test.stan", data = observed, control= list(adapt_delta = 0.9))
+#model = stan_model(file = "circular_test.stan")
+#fit = vb(model, data = observed, iter = 100000, grad_samples = 3)
 
 evaluation_summary(extract(fit), true)
 
 samples = extract(fit)
 num_samples = dim(samples$regulator_estimate)[1]
 samples_to_show = sample(1:num_samples, 10)
-matplot(integration_time, t(samples$regulator_estimate[samples_to_show,]), type= "l", ylim = c(0,1),xlim= c(0,1))
+sample_times = t(samples$time_position[samples_to_show,])
+
+matplot(sample_times, t(samples$regulator_estimate[samples_to_show,]),  type= "p", pch = 15:25, ylim = c(0,1),xlim= c(0,1))
 points(time_position, true$regulator_expression)
 
-matplot(t(samples$time_position[samples_to_show,]), true$regulator_expression, type= "p", pch = 15:25)
-
-
-matplot(integration_time, t(samples$integrated_values[samples_to_show,]), type= "l")
+matplot(sample_times, t(samples$target_estimate[samples_to_show,]),  type= "p", pch = 15:25, ylim = c(0,1),xlim= c(0,1))
 points(time_position, true$target_expression)
 
-matplot(t(samples$time_position[samples_to_show,]), t(samples$target_estimate[samples_to_show,]), type= "l")
-points(time_position, true$target_expression)
+matplot(sample_times, true$regulator_expression, type= "p", pch = 15:25, ylim = c(0,1),xlim= c(0,1))
 
-matplot(t(samples$time_position[samples_to_show,]), true$target_expression, type= "p", pch = 15:25)
+matplot(sample_times, true$target_expression, type= "p", pch = 15:25, ylim = c(0,1),xlim= c(0,1))
 points(time_position, true$target_expression)
 
 ```
