@@ -9,7 +9,7 @@ gp_covariance <- function(distance, gp_scale, gp_length, periodic = FALSE, perio
 
 }
 
-generate_random_profile <- function(time, scale, length, mean_func = 0, periodic = FALSE, period = 1) {
+generate_random_profile <- function(time, scale, length, mean_func = 0, periodic = FALSE, period = 1, positive_transform = TRUE) {
   # Construct the squared exponential covariance matrix
   cov_matrix = array(0,c(length(time), length(time)));
   maxTime = max(time)
@@ -29,27 +29,26 @@ generate_random_profile <- function(time, scale, length, mean_func = 0, periodic
   chol_cov = t(chol(cov_matrix));
   raw_profile = chol_cov %*% rnorm(length(time)) + mean_func;
   # Transform to strictly positive values
-  positive_profile = log1p(exp(raw_profile))
-  return(t(positive_profile))
+  if(positive_transform) {
+    positive_profile = log1p(exp(raw_profile))
+    return(t(positive_profile))
+  } else {
+    return(t(raw_profile))
+  }
 }
 
-plot_random_profiles <- function(n, time, scale, length, true_time = time, true_profile = NULL, mean_func = 0, periodic = FALSE, period = 1, ...) {
+plot_random_profiles <- function(n, time, scale, length, true_time = time, true_profile = NULL, mean_func = 0, periodic = FALSE, period = 1, positive_transform = TRUE) {
   profiles = array(0, c(n, length(time)));
   for(i in 1:n) {
-    profiles[i,] = generate_random_profile(time, scale, length, mean_func = mean_func, periodic = periodic, period = period);
+    profiles[i,] = generate_random_profile(time, scale, length, mean_func = mean_func, periodic = periodic, period = period, positive_transform = positive_transform);
   }
 
-  ymax = max(profiles)
-  ymin = min(profiles)
-  if(!is.null(true_profile)) {
-    ymax = max(ymax, max(true_profile))
-    ymin = min(ymin, min(true_profile))
-  }
 
-  matplot(time, t(profiles), type = "l", ylim = c(ymin, ymax), ...)
+  result = ggmatplot(time, t(profiles))
   if(!is.null(true_profile)) {
-    points(true_time, true_profile, pch = 19)
+    result = result + geom_point(data = data.frame(x = true_time, y = true_profile), aes(x=x, y=y))
   }
+  return(result)
 }
 
 linear_regulation_ode_func <- function(time, regulator_expression ) {

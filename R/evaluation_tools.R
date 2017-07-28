@@ -70,3 +70,60 @@ evaluation_summary <- function(samples, true_params, printParamsResults = TRUE) 
   within95 = mean(quantiles >= 0.025 & quantiles <= 0.975);
   cat("\nWithin 25% interval:", within25,"\nWithin 50% interval:", within50, "\nWithin 95% interval:",within95,"\n")
 }
+
+ggmatplot <- function(xs, ys, x_title = "x", y_title = "value") {
+  x_is_vector = is.null(dim(xs)) || length(dim(xs)) == 1
+  y_is_vector = is.null(dim(ys)) || length(dim(ys)) == 1
+
+  if(y_is_vector) {
+    if(x_is_vector) {
+      num_rows = length(xs)
+      num_cols = 1
+      if(num_rows !=  length(ys)) {
+        stop("Incompatible vector lengths")
+      }
+      values = ys
+    } else {
+      num_rows = dim(xs)[1]
+      num_cols = dim(xs)[2]
+      if(num_rows != length(ys)) {
+        stop("Incompatible y vector with x matrix")
+      }
+      values = rep(ys, times = num_cols)
+    }
+  }
+  else {
+    num_rows = dim(ys)[1]
+    num_cols = dim(ys)[2]
+    if(x_is_vector) {
+      if(num_rows != length(xs)){
+        stop("Incompatible y matrix with x vector")
+      }
+    } else {
+      if(num_rows != dim(xs)[1] || num_cols != dim(ys)[2]){
+        stop("Incompatible y matrix with x matrix")
+      }
+    }
+    values = as.numeric(ys)
+  }
+
+  num_elements = num_rows * num_cols
+  data <- data.frame(
+    x = array(xs, num_elements),
+    column = as.factor(rep(seq(num_cols), each=num_rows)),
+    value = values,
+    stringsAsFactors=FALSE
+  )
+
+  if(num_rows > 10) {
+    color_scale = scale_color_discrete()
+  } else {
+    color_scale = scale_color_brewer(type="qual", palette="Paired")
+  }
+
+  ggplot(data, aes(x = x, y = value, color = column)) + geom_line() +
+    color_scale +
+    scale_x_continuous(name = x_title) +
+    scale_y_continuous(name = y_title)
+
+}
