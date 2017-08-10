@@ -130,6 +130,7 @@ simulate_linear_circular <- function(num_cells, min_time = 5, max_time = 10, w =
 
 simulate_linear_circular_2 <- function(num_cells, num_time, scale, gp_length, w = runif(1, 0.1, 3), decay = runif(1, 0.1, 1), min_variance = 1) {
 
+  steady_period = 3
   time_points = runif(num_cells,0,1);
   time = time_points * (num_time - 1);
 

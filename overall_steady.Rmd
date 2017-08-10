@@ -1,0 +1,90 @@
+---
+title: "Overall steady"
+output: html_notebook
+---
+
+```{r setup}
+library(rstan)
+library(shinystan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
+
+
+```{r}
+#set.seed(254166)
+#set.seed(627953)
+num_cells = 800
+num_regulators = 10
+num_targets = 100
+w_prior_sigma = 2
+w = matrix(abs(rnorm(num_regulators * num_targets, 0, w_prior_sigma)), nrow = num_regulators, ncol = num_targets)
+
+regulator_prior_sigma = 100
+
+
+#derivative_tau = 1
+#derivative_sigma = abs(rcauchy(1,0,derivative_tau))
+derivative_sigma = 0.001
+derivative_noise = matrix(rnorm(num_cells * num_targets, 0, derivative_sigma), nrow = num_cells, ncol = num_targets)
+
+regulator_expression_mean = matrix(abs(rnorm(num_cells * num_regulators, 0, regulator_prior_sigma)), nrow = num_cells, ncol = num_regulators);
+
+target_expression_mean =  regulator_expression_mean %*% w + derivative_noise;
+target_expression_mean[target_expression_mean <= 1e-6] = 1e-6
+
+regulator_expression = array(-1, c(num_regulators, num_cells))
+for(reg in 1:num_regulators) {
+  regulator_expression[reg,] = rpois(num_cells, regulator_expression_mean[,reg])
+}
+target_expression = array(-1, c(num_targets, num_cells))
+for(target in 1:num_targets){
+  target_expression[target,] = rpois(num_cells, target_expression_mean[,target])
+}
+
+true = list(w = w,
+            # derivative_sigma = derivative_sigma,
+            # derivative_noise = derivative_noise,
+            regulator_expression_mean = regulator_expression_mean,
+            target_expression_mean = target_expression_mean)
+observed = list(num_cells = num_cells,
+                num_regulators = num_regulators,
+                num_targets = num_targets,
+                regulator_expression = regulator_expression,
+                target_expresssion = target_expression,
+                w_prior_sigma = w_prior_sigma,
+                # derivative_tau = derivative_tau,
+                regulator_prior_sigma = regulator_prior_sigma
+                #residual_prior_sigma = 1
+                )
+
+fit = stan('overall_steady.stan', data = observed)
+summary(fit, pars = "w")$summary[,c("n_eff","Rhat")]
+evaluate_single_param(extract(fit), "w", true$w)
+evaluation_summary(extract(fit), true, printParamsResults = FALSE)
+
+
+model = stan_model('overall_steady.stan')
+fit_vb = vb(model, data = observed)
+evaluate_single_param(extract(fit_vb), "w", true$w)
+evaluation_summary(extract(fit_vb), true, printParamsResults = FALSE)
+```
+
+```{r}
+stan_code = '
+data {
+  real a;
+}
+
+parameters {
+  real a;
+}
+
+model {
+  a ~ normal(0,1);
+}
+'
+
+fit = stan(model_code = stan_code)
+```
+

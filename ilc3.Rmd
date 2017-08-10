@@ -1,0 +1,72 @@
+---
+title: "ILC 3 test"
+output: html_notebook
+---
+
+
+```{r setup}
+  library(devtools)
+  if (!require("buds",character.only = TRUE))
+  {
+    devtools::install_github("nlhuong/buds")
+  }
+  library(buds)
+  library(rstan)
+  rstan_options(auto_write = TRUE)
+  options(mc.cores = parallel::detectCores())
+
+
+```
+
+```{r}
+load("unversioned-data/ilc3.RData")
+```
+
+# Test BUDS
+```{r}
+num_genes = dim(ilc3_expression_var)[1]
+num_cells = dim(ilc3_expression_var)[2]
+
+sds = apply(ilc3_expression_var,1,sd)
+ilc3_norm = ilc3_expression_var / sds
+means = apply(ilc3_norm,1,mean)
+ilc3_norm = ilc3_norm - means
+
+distances =  as.matrix((1 - cor(ilc3_expression_var, ilc3_expression_var)) / 2)
+distances_norm =  as.matrix((1 - cor(ilc3_norm, ilc3_norm)) / 2)
+
+distances_euclid = as.matrix(dist(t(as.matrix(ilc3_expression_var))))
+
+#celnames = colnames(ilc3_expression_var)
+#rownames(distances) = celnames
+#colnames(distances) = celnames
+```
+
+```{r}
+K = 5
+fit = fit_buds(distances, K = K, method = "vb")
+fit_norm = fit_buds(distances_norm, K = K, method = "vb")
+fit_euclid = fit_buds(distances_euclid, K = K, method = "vb")
+```
+```{r}
+fit_to_test = fit_euclid
+values_to_test = ilc3_expression_var
+gene_idx = 542
+num_samples_to_show = 15
+samples = extract(fit_to_test$fit_buds)
+num_samples = dim(samples$tau)[1]
+samples_to_show = sample.int(num_samples, num_samples_to_show)
+
+times = samples$tau[samples_to_show,]
+gene = as.numeric(values_to_test[gene_idx,])
+
+ggmatplot(t(times), gene, main_geom = geom_point())
+```
+```{r}
+i = sample(1:num_genes,1)
+j = sample(1:num_genes,1)
+
+data = data.frame(x = as.numeric(ilc3_expression_var[i,]), y = as.numeric(ilc3_expression_var[j,]))
+ggplot(data, aes(x=x,y=y)) + geom_point() + ggtitle(paste0(rownames(ilc3_expression_var)[i]," - ",rownames(ilc3_expression_var)[j]))
+```
+

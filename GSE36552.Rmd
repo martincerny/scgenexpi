@@ -1,0 +1,68 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup}
+library(rstan)
+library(shinystan)
+library(tidyverse)
+library(magrittr)
+library(GEOquery) #from bioconductor
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+```
+
+#Download the dat as raw counts
+```{r}
+sampleIDs = c(896803:896816,922146:922228,922230,922250:922275)
+
+downloaded = list()
+next_element = 1
+for(sample in sampleIDs) {
+  #softURL = paste0('https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM',sample,'&targ=self&form=text&view=quick')
+  softData = getGEO(paste0('GSM', sample))
+  title = Meta(softData)$title
+
+  file = NULL
+  file_id = 1
+  repeat {
+    file_url = Meta(softData)[[paste0("supplementary_file_", file_id)]]
+    if(is.null(file_url)) {
+      break;
+    } else if(grepl("expression\\.txt\\.gz$", file_url)) {
+      file = file_url
+      break;
+    }
+    file_id = file_id + 1
+  }
+  
+  if(is.null(file)) {
+    warning(paste0("Could not download file for sample ", sample))
+    next
+  }
+
+  temp <- tempfile();
+  download.file(file, temp)
+  df = read.table(gzfile(temp), header= TRUE, stringsAsFactors = FALSE)
+  df$title = title
+  downloaded[[next_element]] = df
+  next_element = next_element + 1
+}
+
+for(i in 1:length(downloaded)) {
+  colnames(downloaded[[i]])[2] = "reads"
+}
+all_data = do.call(rbind.data.frame, downloaded)
+
+matrix = all_data %>% 
+  select(title,GeneID, reads) %>%
+  spread(key="title", value="reads") %>%
+  remove_rownames() %>%
+  column_to_rownames("GeneID")
+
+#Clean up the mess
+rm(sampleIDs, downloaded, next_element, sample, title, softData, file, file_id, file_url, temp, df, i)
+```
+

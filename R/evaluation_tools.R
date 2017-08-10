@@ -1,6 +1,6 @@
 missing_arg <- function() quote(expr=)
 
-evaluate_single_param <- function(samples, param_name, indices, trueValue) {
+evaluate_single_param_indices <- function(samples, param_name, indices, trueValue) {
   if(is.null(indices)) {
     param_samples = samples[[param_name]];
   }
@@ -22,39 +22,47 @@ evaluate_single_param <- function(samples, param_name, indices, trueValue) {
   ))
 }
 
+evaluate_single_param <- function(samples, param_name, param_values)
+{
+  result = list();
+  next_element = 1
+  if(is.null(dim(param_values)) || (length(dim(param_values)) == 1)) {
+    if(length(param_values) > 1) {
+      for(i in 1:length(param_values)) {
+        result[[next_element]] = evaluate_single_param_indices(samples, param_name, list(i), param_values[i])
+        next_element = next_element + 1
+      }
+    } else {
+      result[[next_element]] = evaluate_single_param_indices(samples, param_name, NULL, param_values)
+      next_element = next_element + 1
+    }
+  }
+  else {
+    if(length(dim(param_values)) == 2)
+    {
+      for(i in 1:dim(param_values)[1]) {
+        for(j in 1:dim(param_values)[2]) {
+          result[[next_element]] = evaluate_single_param_indices(samples, param_name, list(i,j), param_values[i,j])
+          next_element = next_element + 1
+        }
+      }
+    } else {
+      stop("3+ dimensional parameters not supported yet");
+    }
+  }
+  return(do.call(rbind.data.frame, result))
+}
 
 evaluate_all_params <- function(samples, true_params) {
-  next_element = 1
   result = list();
+  next_element = 1;
   for(param_name in names(true_params)) {
     if(!param_name %in% names(samples)) {
       next;
     }
     param_values = get(param_name, true_params);
-    if(is.null(dim(param_values)) || (length(dim(param_values)) == 1)) {
-      if(length(param_values) > 1) {
-        for(i in 1:length(param_values)) {
-          result[[next_element]] = evaluate_single_param(samples, param_name, list(i), param_values[i])
-          next_element = next_element + 1
-        }
-      } else {
-        result[[next_element]] = evaluate_single_param(samples, param_name, NULL, param_values)
-        next_element = next_element + 1
-      }
-    }
-    else {
-      if(length(dim(param_values)) == 2)
-      {
-        for(i in 1:dim(param_values)[1]) {
-          for(j in 1:dim(param_values)[2]) {
-            result[[next_element]] = evaluate_single_param(samples, param_name, list(i,j), param_values[i,j])
-            next_element = next_element + 1
-          }
-        }
-      } else {
-        stop("3+ dimensional parameters not supported yet");
-      }
-    }
+    result[[next_element]] = evaluate_single_param(samples, param_name, param_values)
+    next_element = next_element + 1
   }
   return(do.call(rbind.data.frame, result));
 }
@@ -71,9 +79,15 @@ evaluation_summary <- function(samples, true_params, printParamsResults = TRUE) 
   cat("\nWithin 25% interval:", within25,"\nWithin 50% interval:", within50, "\nWithin 95% interval:",within95,"\n")
 }
 
-ggmatplot <- function(xs, ys, x_title = "x", y_title = "value") {
-  x_is_vector = is.null(dim(xs)) || length(dim(xs)) == 1
-  y_is_vector = is.null(dim(ys)) || length(dim(ys)) == 1
+is_vector_like <- function(xs) {
+  is.null(dim(xs)) ||
+    length(dim(xs)) == 1 ||
+    (sum(dim(xs) == 1) >= length(dim(xs)) - 1) #multiple dimensions, but all except one are of size 1
+}
+
+ggmatplot <- function(xs, ys, x_title = "x", y_title = "value", main_geom = geom_line()) {
+  x_is_vector = is_vector_like(xs)
+  y_is_vector = is_vector_like(ys)
 
   if(y_is_vector) {
     if(x_is_vector) {
@@ -121,9 +135,8 @@ ggmatplot <- function(xs, ys, x_title = "x", y_title = "value") {
     color_scale = scale_color_brewer(type="qual", palette="Paired")
   }
 
-  ggplot(data, aes(x = x, y = value, color = column)) + geom_line() +
+  ggplot(data, aes(x = x, y = value, color = column)) + main_geom +
     color_scale +
     scale_x_continuous(name = x_title) +
     scale_y_continuous(name = y_title)
-
 }
