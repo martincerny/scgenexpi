@@ -8,6 +8,7 @@ data {
   //real<lower=0> derivative_tau;
 
   real<lower=0> regulator_prior_sigma;
+  real<lower=0> regulator_prior_mean;
   //real<lower=0> residual_prior_sigma;
 }
 
@@ -18,12 +19,25 @@ parameters {
 }
 
 transformed parameters {
-  matrix<lower=0>[num_cells, num_targets] target_expression_mean = regulator_expression_mean * w;// + derivatives_noise;
 }
 
 model {
+  matrix[num_cells, num_targets] target_expression_mean = regulator_expression_mean * w;// + derivatives_noise;
   //residual ~ normal(0,residual_prior_sigma);
-
+  // int do_print = 0;
+  // for(c in 1:num_cells) {
+  //   for(t in 1:num_targets) {
+  //     if(is_nan(target_expression_mean[c,t])){
+  //       print("Nan at",c,":",t);
+  //       do_print = 1;
+  //     }
+  //   }
+  // }
+  // if(do_print == 1){
+  //   print(target_expression_mean);
+  //   print(w);
+  //   print(regulator_expression_mean);
+  // }
   //poisson, because equilibrium over time (and am interested in protein which should smooth time out)
   for(reg in 1:num_regulators) {
     regulator_expression[reg,] ~ poisson(regulator_expression_mean[,reg]);
@@ -35,7 +49,7 @@ model {
   }
 
   for(reg in 1:num_regulators) {
-    regulator_expression_mean[,reg] ~ normal(0, regulator_prior_sigma);
+    regulator_expression_mean[,reg] ~ lognormal(regulator_prior_mean, regulator_prior_sigma);
   }
 
   for(target in 1:num_targets){

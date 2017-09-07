@@ -14,13 +14,14 @@ options(mc.cores = parallel::detectCores())
 ```{r}
 #set.seed(254166)
 #set.seed(627953)
-num_cells = 800
+num_cells = 80
 num_regulators = 10
-num_targets = 100
+num_targets = 10
 w_prior_sigma = 2
 w = matrix(abs(rnorm(num_regulators * num_targets, 0, w_prior_sigma)), nrow = num_regulators, ncol = num_targets)
 
-regulator_prior_sigma = 100
+regulator_prior_sigma = 3
+regulator_prior_mean = 3
 
 
 #derivative_tau = 1
@@ -28,7 +29,7 @@ regulator_prior_sigma = 100
 derivative_sigma = 0.001
 derivative_noise = matrix(rnorm(num_cells * num_targets, 0, derivative_sigma), nrow = num_cells, ncol = num_targets)
 
-regulator_expression_mean = matrix(abs(rnorm(num_cells * num_regulators, 0, regulator_prior_sigma)), nrow = num_cells, ncol = num_regulators);
+regulator_expression_mean = matrix(abs(rlnorm(num_cells * num_regulators, regulator_prior_mean, regulator_prior_sigma)), nrow = num_cells, ncol = num_regulators);
 
 target_expression_mean =  regulator_expression_mean %*% w + derivative_noise;
 target_expression_mean[target_expression_mean <= 1e-6] = 1e-6
@@ -54,6 +55,7 @@ observed = list(num_cells = num_cells,
                 target_expresssion = target_expression,
                 w_prior_sigma = w_prior_sigma,
                 # derivative_tau = derivative_tau,
+                regulator_prior_mean = regulator_prior_mean,
                 regulator_prior_sigma = regulator_prior_sigma
                 #residual_prior_sigma = 1
                 )
@@ -64,10 +66,11 @@ evaluate_single_param(extract(fit), "w", true$w)
 evaluation_summary(extract(fit), true, printParamsResults = FALSE)
 
 
-model = stan_model('overall_steady.stan')
-fit_vb = vb(model, data = observed)
-evaluate_single_param(extract(fit_vb), "w", true$w)
-evaluation_summary(extract(fit_vb), true, printParamsResults = FALSE)
+#model = stan_model('overall_steady.stan')
+#fit_vb = vb(model, data = observed)
+#evaluate_single_param(extract(fit_vb), "w", true$w)
+#evaluation_summary(extract(fit_vb), true, printParamsResults = FALSE)
+
 ```
 
 ```{r}

@@ -8,9 +8,15 @@ library(rstan)
 library(shinystan)
 library(tidyverse)
 library(magrittr)
+library(BiocGenerics)
+library(Biobase)
+library(GenomeInfoDbData) #from bioconductor
 library(GEOquery) #from bioconductor
+library(AUCell) #via devtools::install_github("aertslab/AUCell")
+library(RcisTarget) #via devtools::install_github("aertslab/RcisTarget")
 rstan_options(auto_write = TRUE)
-options(mc.cores = parallel::detectCores())
+#options(mc.cores = parallel::detectCores())
+options(mc.cores = 1)
 
 ```
 
@@ -56,13 +62,100 @@ for(i in 1:length(downloaded)) {
 }
 all_data = do.call(rbind.data.frame, downloaded)
 
-matrix = all_data %>% 
+exprMat = all_data %>% 
   select(title,GeneID, reads) %>%
   spread(key="title", value="reads") %>%
   remove_rownames() %>%
-  column_to_rownames("GeneID")
+  column_to_rownames("GeneID") %>%
+  as.matrix()
+
+exprMat[is.na(exprMat)] = 0
 
 #Clean up the mess
 rm(sampleIDs, downloaded, next_element, sample, title, softData, file, file_id, file_url, temp, df, i)
+```
+
+The following preprocessing is copied from the SCENIC workflow: https://htmlpreview.github.io/?https://github.com/aertslab/SCENIC/blob/master/inst/doc/SCENIC_runningStep1nWrapper.html
+
+
+```{r}
+ library(RcisTarget.mm9.motifDatabases.20k)
+  
+  # Get genes in databases:
+  data(mm9_500bpUpstream_motifRanking) # or 10kbp, they should have the same genes
+  genesInDatabase <- mm9_500bpUpstream_motifRanking@rankings$rn
+  
+  # Get TFS in databases:
+  data(mm9_direct_motifAnnotation)
+  allTFs <- mm9_direct_motifAnnotation$allTFs
+```
+
+Summarize data for filtering
+
+```{r}
+nCellsPerGene <- apply(exprMat, 1, function(x) sum(x>0))
+nCountsPerGene <- apply(exprMat, 1, sum)
+summary(nCellsPerGene)
+summary(nCountsPerGene)
+max(exprMat)
+sum(exprMat>0) / sum(exprMat==0)
+```
+
+```{r}
+minReads <- 3*.01*ncol(exprMat)
+genesLeft_minReads <- names(nCountsPerGene)[which(nCountsPerGene > minReads)]
+length(genesLeft_minReads)
+
+minSamples <- ncol(exprMat)*.01
+nCellsPerGene2 <- nCellsPerGene[genesLeft_minReads]
+genesLeft_minCells <- names(nCellsPerGene2)[which(nCellsPerGene2 > minSamples)]
+length(genesLeft_minCells)
+
+genesLeft_minCells_inDatabases <- genesLeft_minCells[which(toupper(genesLeft_minCells) %in% toupper(genesInDatabase))]
+length(genesLeft_minCells_inDatabases)
+```
+
+
+```{r}
+inputTFs <- allTFs[toupper(allTFs)%in% toupper(genesLeft_minCells_inDatabases)]
+c(allTFs=length(allTFs), inputTFs=length(inputTFs))
+```
+#Additional filtering
+Makes no sense to consider self-regulation
+```{r}
+targetGenes <- genesLeft_minCells_inDatabases[!(toupper(genesLeft_minCells_inDatabases) %in% toupper(allTFs))]
+length(targetGenes)
+```
+
+```{r}
+tf_counts = exprMat[toupper(inputTFs),]
+log_counts = as.array(log(tf_counts))
+log_counts = log_counts[!is.infinite(log_counts)]
+plot(density(log_counts))
+pos_to_plot = seq(min(log_counts), max(log_counts), length.out = 1000)
+lines(pos_to_plot, dnorm(pos_to_plot, mean(log_counts), sd(log_counts)), col = "blue") 
+lines(pos_to_plot, dnorm(pos_to_plot, mean(log_counts), 2* sd(log_counts)), col = "orange") 
+regulator_prior_mean = mean(log_counts)
+regulator_prior_sigma = 2 * sd(log_counts)
+```
+
+
+#Running our model
+```{r}
+#w_prior_sigma = length(inputTFs)
+#stan_data = list(
+  num_cells = dim(exprMat)[2]
+                num_regulators = length(inputTFs)
+                num_targets = length(targetGenes)
+                regulator_expression = exprMat[toupper(inputTFs),]
+                target_expression = exprMat[toupper(rownames(exprMat)) %in% toupper(targetGenes),]
+                w_prior_sigma = 0.03
+                regulator_prior_mean = regulator_prior_mean
+                regulator_prior_sigma = regulator_prior_sigma
+ #               )  
+
+#fit = stan('overall_steady.stan', data = stan_data)
+stan_rdump(c("num_cells","num_regulators","num_targets","regulator_expression","target_expression","w_prior_sigma","regulator_prior_sigma","regulator_prior_mean"), 'unversioned-data/gse36552_stan_input')
+
 ```
 
