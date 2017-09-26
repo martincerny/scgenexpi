@@ -13,7 +13,7 @@ options(mc.cores = parallel::detectCores())
 ```
 
 ```{r}
-num_measurements = 100
+num_measurements = 200
 num_categories = 6
 
 prior_zero_alpha = 2
@@ -26,15 +26,21 @@ prior_mean_sd = 3
 #prior_dispersion_sd = 2
 prior_dispersion_rate = 0.1
 
-zero_prob = rbeta(num_categories, prior_zero_alpha, prior_zero_beta)
+zero_prob_ext = rbeta(num_categories, prior_zero_alpha, prior_zero_beta)
 mean_count = rlnorm(num_categories, prior_mean_mean, prior_mean_sd)
 #dispersion = rlnorm(num_categories, prior_dispersion_mean, prior_dispersion_sd)
 dispersion_inv = rexp(num_categories, prior_dispersion_rate)
 dispersion = 1/dispersion_inv
 
 categories = sample(1:num_categories, num_measurements, replace = TRUE)
-counts_zero = rbernoulli(num_measurements, zero_prob[categories])
+counts_zero = rbernoulli(num_measurements, zero_prob_ext[categories])
 counts = if_else(counts_zero, 0, rnbinom(num_measurements, mu = mean_count[categories], size = dispersion[categories]))
+
+while(any(!counts_zero & counts == 0)) {
+  to_replace = (!counts_zero & counts == 0)
+  num_to_replace = sum(to_replace)
+  counts[to_replace] = rnbinom(num_to_replace, mu = mean_count[categories[to_replace]], size = dispersion[categories[to_replace]])
+}
 
 observed = list(
   num_measurements = length(counts),
@@ -48,12 +54,12 @@ observed = list(
   #prior_dispersion_mean = prior_dispersion_mean,
   #prior_dispersion_sd = prior_dispersion_sd
   prior_dispersion_rate = prior_dispersion_rate,
-  ignore_dispersion_threshold = 3
+  ignore_dispersion_threshold = 1
 )
 
 true = list(
-  zero_prob = zero_prob,
-  zero_prob_ext = zero_prob + (1 - zero_prob) * dnbinom(0, mu = mean_count, size = dispersion),
+  #zero_prob = zero_prob,
+  zero_prob_ext = zero_prob_ext,#zero_prob + (1 - zero_prob) * dnbinom(0, mu = mean_count, size = dispersion),
   mean_count = mean_count,
   dispersion_inv = dispersion_inv,
   dispersion = dispersion
