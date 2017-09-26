@@ -1,0 +1,113 @@
+---
+title: "GSE 75748"
+output: html_notebook
+---
+
+
+```{r setup}
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r}
+data = as.tibble(read.csv(gzfile('unversioned-data/GSE75748_sc_time_course_ec.csv.gz'), stringsAsFactors = FALSE))
+```
+
+```{r}
+cell_regular_expression = "H9\\.([0-9]{2,3})h(b4s)?_([0-9]){3}"
+time_match = "\\1"
+id_match = "\\3"
+
+data_tidy = data %>%
+  rename(gene = X) %>%
+  gather(cell, count, -gene) %>%
+  mutate(time = as.integer(gsub(cell_regular_expression, time_match, cell)),
+         time_factor = as.factor(time),
+         id = as.integer(gsub(cell_regular_expression, id_match, cell))
+         )
+
+
+
+```
+
+Get some insight on data
+```{r}
+data_tidy %>%
+  group_by(time) %>% summarise(num_cells = length(unique(cell))) 
+
+```
+
+
+```{r}
+genes_to_include = data_tidy %>%
+  group_by(gene) %>% summarize(num_expressed = sum(count >= 1)) %>%
+  filter(num_expressed > 30) 
+
+num_genes = length(genes_to_include$gene)
+
+cells_to_include = data_tidy %>%
+  group_by(cell) %>% summarize(num_expressed = sum(count >= 1)) %>%
+  filter(num_expressed > num_genes / 5) 
+
+cells_to_include %>% ggplot(aes(x = num_expressed)) + geom_histogram()
+
+num_cells = length(cells_to_include$cell)
+
+data_tidy = data_tidy %>% filter(cell %in% cells_to_include$cell & gene %in% genes_to_include$gene)
+
+```
+
+
+```{r}
+sample_genes = sample(genes_to_include$gene, 12)
+
+data_plot = data_tidy %>%
+  filter(gene %in% sample_genes) 
+
+data_plot %>%
+  ggplot(aes(x = time_factor,y = count, group = time))  + #geom_boxplot(data = data_plot %>% filter(is_zero == 0), outlier.shape =  NA) + 
+    geom_jitter(size = 0.1,alpha = 0.2, color = "blue", position=position_jitter(width=0.2)) +
+    facet_wrap(~  gene, scales = "free", ncol = 4)
+```
+
+
+```{r}
+num_plots = 12
+sample_genes = sample(genes_to_include$gene, num_plots)
+sample_time = sample(data_tidy$time_factor, 1)
+
+data_plot = data_tidy %>%
+  filter(gene %in% sample_genes & time_factor == sample_time)
+
+data_plot %>% 
+  ggplot(aes(x = count)) + geom_histogram(bins = 30) + 
+  facet_wrap(~  gene, scales = "free", ncol = 4)
+
+```
+
+
+```{r}
+gene_time_summary = data_tidy %>%
+  #filter(count > 0) %>%
+  group_by(gene, time) %>%
+  summarise(mean_count = mean(count), sd_count = sd(count)) %>%
+  filter(!is.na(sd_count)) %>%
+  mutate(dispersion = (mean_count ^ 2) / ((sd_count ^ 2) - mean_count),
+         dispersion_inv = ((sd_count ^ 2) - mean_count) / (mean_count ^ 2),
+         is_dispersed = sd_count ^ 2 > mean_count)
+  
+mean(gene_time_summary$is_dispersed)
+
+gene_time_summary %>% ungroup() %>%
+  filter(!is.na(dispersion) & !is.infinite(dispersion) & dispersion > 0) %>% summarize(mean_log_disp = mean(log(dispersion)), sd_log_disp = sd(log(dispersion)), mean_inv = mean(dispersion_inv), sd_inv = sd(dispersion_inv))
+
+gene_time_summary %>% filter(!is.infinite(dispersion) &!is.na(dispersion) & dispersion > 0) %>% ggplot(aes(x = log(dispersion))) + geom_histogram(bins = 60)
+
+gene_time_summary %>% ggplot(aes(x = (dispersion_inv))) + geom_histogram(bins = 60)
+
+```
+
+```{r}
+
+```
+

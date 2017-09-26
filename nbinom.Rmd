@@ -1,0 +1,77 @@
+---
+title: "Neg. binom model test"
+output: html_notebook
+---
+
+
+```{r setup}
+library(tidyverse)
+library(rstan)
+library(bayesplot)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
+
+```{r}
+num_measurements = 100
+num_categories = 6
+
+prior_zero_alpha = 2
+prior_zero_beta = 2
+
+prior_mean_mean = 7
+prior_mean_sd = 3
+
+#prior_dispersion_mean = 1
+#prior_dispersion_sd = 2
+prior_dispersion_rate = 0.1
+
+zero_prob = rbeta(num_categories, prior_zero_alpha, prior_zero_beta)
+mean_count = rlnorm(num_categories, prior_mean_mean, prior_mean_sd)
+#dispersion = rlnorm(num_categories, prior_dispersion_mean, prior_dispersion_sd)
+dispersion_inv = rexp(num_categories, prior_dispersion_rate)
+dispersion = 1/dispersion_inv
+
+categories = sample(1:num_categories, num_measurements, replace = TRUE)
+counts_zero = rbernoulli(num_measurements, zero_prob[categories])
+counts = if_else(counts_zero, 0, rnbinom(num_measurements, mu = mean_count[categories], size = dispersion[categories]))
+
+observed = list(
+  num_measurements = length(counts),
+  num_categories = num_categories,
+  counts = counts,
+  categories = categories,
+  prior_zero_alpha = prior_zero_alpha,
+  prior_zero_beta = prior_zero_beta,
+  prior_mean_mean = prior_mean_mean,
+  prior_mean_sd = prior_mean_sd,
+  #prior_dispersion_mean = prior_dispersion_mean,
+  #prior_dispersion_sd = prior_dispersion_sd
+  prior_dispersion_rate = prior_dispersion_rate,
+  ignore_dispersion_threshold = 3
+)
+
+true = list(
+  zero_prob = zero_prob,
+  zero_prob_ext = zero_prob + (1 - zero_prob) * dnbinom(0, mu = mean_count, size = dispersion),
+  mean_count = mean_count,
+  dispersion_inv = dispersion_inv,
+  dispersion = dispersion
+)
+
+fit = stan('nbinom.stan', data = observed,  control = list(adapt_delta = 0.8))
+
+summary(fit)$summary[,"Rhat"]
+evaluation_summary(rstan::extract(fit), true)
+```
+```{r}
+draws = as.array(fit, pars = c("mean_count"))
+draws2 = as.array(fit, pars = c("zero_prob_ext"))
+draws3 = as.array(fit, pars = c("dispersion_inv"))
+np = nuts_params(fit)
+mcmc_parcoord(draws, np = np, alpha = 0.1, transformations = log)
+mcmc_parcoord(draws2, np = np, alpha = 0.1)
+mcmc_parcoord(draws3, np = np, alpha = 0.1, transformations = log)
+
+```
+

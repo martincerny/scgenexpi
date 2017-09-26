@@ -16,7 +16,7 @@ options(mc.cores = parallel::detectCores())
 
 
 ```{r}
-set.seed(1662)
+#set.seed(2514681)
 
 num_cells = 15
 w = 1
@@ -27,17 +27,19 @@ time_shape_2 = 1.2
 time_position = rbeta(num_cells, time_shape_1, time_shape_2) #runif(num_cells, 0, 1)
 integration_time = ((1:num_integration_points) - 1) / (num_integration_points - 1)
 
-gp_sigma = 1.5
+gp_sigma = 0.8
 gp_length = 0.3#1.5
 gp_mean = 0.7
-regulator_expression = generate_random_profile(time_position,scale = gp_sigma, length = gp_length,  mean_func = gp_mean, periodic = FALSE, positive_transform = FALSE)
+regulator_expression = generate_random_profile(time_position,scale = gp_sigma, length = gp_length, periodic = FALSE, positive_transform = FALSE)
 
 time_order = order(time_position)
 
-target_expression = numeric(num_cells)
-time_diff = diff(time_position[time_order])
-target_expression[1] = 0
-target_expression[time_order[2:num_cells]] = 0.5 * cumsum((regulator_expression[time_order[1:(num_cells - 1)]] + regulator_expression[time_order[2:num_cells]]) * time_diff) 
+#target_expression = numeric(num_cells)
+#time_diff = diff(time_position[time_order])
+#target_expression[1] = 0
+#target_expression[time_order[2:num_cells]] = 0.5 * cumsum((regulator_expression[time_order[1:(num_cells - 1)]] + regulator_expression[time_order[2:num_cells]]) * time_diff) 
+
+target_expression = time_position;
 
 true = data.frame(time_position = time_position, 
             regulator_expression = t(regulator_expression), 
@@ -46,8 +48,16 @@ true = data.frame(time_position = time_position,
 
 ggplot(true, aes(x = time_position)) + geom_line(aes(y = regulator_expression)) + geom_line(aes(y=target_expression))
 
+min_shape = 5
+time_position_prior_alpha = rep_len(min_shape, length(time_position))
+time_position_prior_beta = (time_position_prior_alpha / time_position) - time_position_prior_alpha
+small_beta = time_position_prior_beta <= min_shape
+time_position_prior_beta[small_beta] = min_shape
+time_position_prior_alpha[small_beta] = (min_shape * time_position[small_beta]) / (1 - time_position[small_beta])
+
 
 observed = list(num_cells = num_cells, 
+                time_position = time_position, 
                 target_expression = rnorm(num_cells, true$target_expression, sigma), 
                 regulator_expression = rnorm(num_cells, true$regulator_expression, sigma), 
                 expression_sigma = sigma,
@@ -58,46 +68,61 @@ observed = list(num_cells = num_cells,
                 gp_mean = gp_mean,
                 time_shape_1 = time_shape_1,
                 time_shape_2 = time_shape_2,
+                time_position_prior_alpha = time_position_prior_alpha,
+                time_position_prior_beta = time_position_prior_beta,
                 debug = 0
                 )
-observed$target_expression[observed$target_expression < 0] = 0
-observed$regulator_expression[observed$regulator_expression < 0] = 0
+#observed$target_expression[observed$target_expression < 0] = 0
+#observed$regulator_expression[observed$regulator_expression < 0] = 0
 
 initf <- function() {
   list(time_position = time_position)
 }
 
 
-#fit = stan("circular_test.stan", data = observed, control= list(adapt_delta = 0.9), init = initf, chains = 1, iter = 1)
+# model = stan_model(file = "circular_test.stan")
+# opt_result = optimizing(model, data = observed, as_vector = FALSE)$par;
+
+# gg_opt_data = data.frame(time = opt_result$time_position, reg = opt_result$regulator_true, target = opt_result$target_estimate) %>%
+#   gather(type, value, reg, target) %>%
+#   mutate(type = as.factor(type));
+# ggplot(gg_opt_data, aes(x = time, y = value, color = type)) + geom_line() +
+#   geom_point(data = data.frame(x = time_position, y = true$regulator_expression), aes(x = x, y=y), color="black") + 
+#   geom_point(data = data.frame(x = time_position, y = true$target_expression), aes(x = x, y=y), color="blue")
+
 fit = stan("circular_test.stan", data = observed, control= list(adapt_delta = 0.9))
 #model = stan_model(file = "circular_test.stan")
-#fit = vb(model, data = observed, iter = 100000, grad_samples = 3)
+#fit = vb(model, data = observed, iter = 100000)
 
 evaluation_summary(rstan::extract(fit), true)
 
 samples = rstan::extract(fit)
-num_samples = dim(samples$regulator_estimate)[1]
+num_samples = dim(samples$time_position)[1]
 samples_to_show = sample(1:num_samples, 10)
 sample_times = t(samples$time_position[samples_to_show,])
+#sample_times = time_position
 
 
-ggmatplot(sample_times, t(samples$regulator_estimate[samples_to_show,]), x_title = "Sample Time", y_title = "Regulator estimate") + 
+# ggmatplot(sample_times, t(samples$regulator_estimate[samples_to_show,]), x_title = "Sample Time", y_title = "Regulator estimate") +
+#  geom_point(data = data.frame(x = time_position, y = true$regulator_expression), aes(x = x, y=y), color="black")
+
+ggmatplot(sample_times, t(samples$regulator_true[samples_to_show,]), x_title = "Sample Time", y_title = "Regulator GP") +
   geom_point(data = data.frame(x = time_position, y = true$regulator_expression), aes(x = x, y=y), color="black")
 
-ggmatplot(sample_times, t(samples$target_estimate[samples_to_show,]), x_title = "Sample Time", y_title = "Target estimate") + 
+ggmatplot(sample_times, t(samples$target_estimate[samples_to_show,]), x_title = "Sample Time", y_title = "Target estimate") +
   geom_point(data = data.frame(x = time_position, y = true$target_expression), aes(x = x, y=y), color="black")
 
-ggmatplot(sample_times, observed$regulator_expression, x_title = "Sample Time", y_title = "Observed Regulator") + 
+ggmatplot(sample_times, observed$regulator_expression, x_title = "Sample Time", y_title = "Observed Regulator") +
   geom_point(data = data.frame(x = time_position, y = true$regulator_expression), aes(x = x, y=y), color="black")
 
-ggmatplot(sample_times, observed$target_expression, x_title = "Sample Time", y_title = "Observed Target") + 
+ggmatplot(sample_times, observed$target_expression, x_title = "Sample Time", y_title = "Observed Target") +
   geom_point(data = data.frame(x = time_position, y = true$target_expression), aes(x = x, y=y), color="black")
 
-ggmatplot(sample_times, true$regulator_expression, x_title = "Sample Time", y_title = "True Regulator")  + 
-  geom_point(data = data.frame(x = time_position, y = true$regulator_expression), aes(x = x, y=y), color="black")
-  
-ggmatplot(sample_times, true$target_expression, x_title = "Sample Time", y_title = "True Target") + 
-  geom_point(data = data.frame(x = time_position, y = true$target_expression), aes(x = x, y=y), color="black")
+ggmatplot(sample_times, true$regulator_expression, x_title = "Sample Time", y_title = "True Regulator")  +
+   geom_point(data = data.frame(x = time_position, y = true$regulator_expression), aes(x = x, y=y), color="black")
+
+ ggmatplot(sample_times, true$target_expression, x_title = "Sample Time", y_title = "True Target") +
+   geom_point(data = data.frame(x = time_position, y = true$target_expression), aes(x = x, y=y), color="black")
 
 ```
 

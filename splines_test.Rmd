@@ -1,0 +1,88 @@
+---
+title: "Splines test"
+output: html_notebook
+---
+
+```{r setup}
+library(splines)
+library(rstan)
+library(tidyverse)
+library(cowplot)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
+
+```{r}
+num_cells = 10
+
+time_position = runif(num_cells,0,1);
+knots = c(0,1/3,2/3,1)
+spline_degree = 3
+
+expression_sigma = 0.1
+coeff_sigma = 1
+
+basis = bs(time_position, degree = spline_degree, knots = knots, Boundary.knots = c(knots[1],knots[length(knots)]))
+
+num_coeff = dim(basis)[2] - 1
+if(any(basis[,num_coeff + 1] != 0)) {
+  stop("Broken assumption of zero column in bs output")
+}
+basis = basis[,1:num_coeff]
+coeffs = rnorm(num_coeff,0, coeff_sigma)
+
+regulator = basis %*% coeffs
+true = list(
+  time_position = time_position,
+  regulator = regulator,
+  target = time_position,
+  coeffs = coeffs
+)
+
+min_shape = 5
+time_position_prior_alpha = rep_len(min_shape, length(time_position))
+time_position_prior_beta = (time_position_prior_alpha / time_position) - time_position_prior_alpha
+small_beta = time_position_prior_beta <= min_shape
+time_position_prior_beta[small_beta] = min_shape
+time_position_prior_alpha[small_beta] = (min_shape * time_position[small_beta]) / (1 - time_position[small_beta])
+
+observed = list(
+  num_cells = num_cells,
+  num_knots = length(knots),
+  knots = knots,
+  spline_degree = spline_degree,
+  regulator_expression = rnorm(length(regulator), regulator, expression_sigma),
+  target_expression = rnorm(length(time_position), time_position, expression_sigma),
+  time_position_prior_alpha = time_position_prior_alpha,
+  time_position_prior_beta = time_position_prior_beta,
+  coeff_sigma = coeff_sigma,
+  expression_sigma = expression_sigma
+)
+
+fit = stan("splines_test.stan", data = observed)
+
+evaluation_summary(rstan::extract(fit), true)
+
+samples = rstan::extract(fit)
+num_samples = dim(samples$coeffs)[1]
+samples_to_show = sample(1:num_samples, 10)
+sample_times = t(samples$time_position[samples_to_show,])
+
+ggmatplot(sample_times, t(samples$regulator_true[samples_to_show,]), x_title = "Sample Time", y_title = "Regulator GP") +
+  geom_point(data = data.frame(x = time_position, y = true$regulator), aes(x = x, y=y), color="black")
+
+ggmatplot(sample_times, observed$regulator_expression, x_title = "Sample Time", y_title = "Observed Regulator") +
+  geom_point(data = data.frame(x = time_position, y = true$regulator), aes(x = x, y=y), color="black")
+
+ggmatplot(sample_times, observed$target_expression, x_title = "Sample Time", y_title = "Observed Target") +
+  geom_point(data = data.frame(x = time_position, y = true$target), aes(x = x, y=y), color="black")
+
+ggmatplot(sample_times, true$regulator, x_title = "Sample Time", y_title = "True Regulator")  +
+   geom_point(data = data.frame(x = time_position, y = true$regulator), aes(x = x, y=y), color="black")
+
+ ggmatplot(sample_times, true$target, x_title = "Sample Time", y_title = "True Target") +
+   geom_point(data = data.frame(x = time_position, y = true$target), aes(x = x, y=y), color="black")
+
+#ggplot(true, aes(x = time_position, y = regulator)) + geom_line()
+```
+

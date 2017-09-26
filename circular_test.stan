@@ -9,22 +9,27 @@ functions {
 data {
   int num_cells;
   int num_integration_points;
-  vector<lower=0>[num_cells] regulator_expression;
-  vector<lower=0>[num_cells] target_expression;
+  //vector<lower=0>[num_cells] regulator_expression;
+  //vector<lower=0>[num_cells] target_expression;
+  vector[num_cells] regulator_expression;
+  vector[num_cells] target_expression;
   real expression_sigma;
   real regulator_bandwidth;
   int debug;
   real gp_sigma;
   real gp_length;
   real gp_mean;
-  real time_shape_1;
-  real time_shape_2;
+  //real time_shape_1;
+  //real time_shape_2;
+  real time_position_prior_alpha[num_cells];
+  real time_position_prior_beta[num_cells];
+
+
 }
 
 transformed data {
-  vector[num_cells] mean_function = rep_vector(0.5, num_cells);
-  matrix[num_cells,num_cells] dist;
 /*
+  matrix[num_cells,num_cells] dist;
   for(i in 1:num_cells) {
     dist[i,i] = 0;
     for(j in (i + 1):num_cells) {
@@ -36,6 +41,8 @@ transformed data {
     }
   }
 */
+
+
 }
 
 parameters {
@@ -46,6 +53,7 @@ parameters {
   real<lower=0> time_shape_2;
 
   */
+
   real<lower = 0, upper = 1> time_position[num_cells];
 
   vector[num_cells] regulator_true_raw;
@@ -54,25 +62,17 @@ parameters {
 transformed parameters {
   //vector<lower=0>[num_cells] regulator_estimate;
   //vector<lower=0>[num_cells] target_estimate;
-  vector[num_cells] regulator_estimate;
+  vector[num_cells] regulator_true;
+  //vector[num_cells] regulator_estimate;
   vector[num_cells] target_estimate;
 
   {
     matrix[num_cells, num_cells] cov_m = cov_exp_quad(time_position, gp_sigma, gp_length);
     matrix[num_cells, num_cells] cov_m_chol;
-
-    for(i in 1:num_cells) {
-      cov_m[i,i] = cov_m[i,i] + 1e-6;
-    }
-
-    cov_m_chol = cholesky_decompose(cov_m);
-    regulator_estimate = cov_m_chol * regulator_true_raw + gp_mean;
-  }
-  {
-    int ordering[num_cells];
+    //int ordering[num_cells];
     real regulator_zero;
     real integral;
-
+/*
     for(i in 1:num_cells) {
       ordering[i] = i;
     }
@@ -85,14 +85,24 @@ transformed parameters {
         }
       }
     }
+*/
+    for(i in 1:num_cells) {
+      cov_m[i,i] = cov_m[i,i] + 1e-6;
+    }
 
+    cov_m_chol = cholesky_decompose(cov_m);
+
+    regulator_true = cov_m_chol * regulator_true_raw;
+
+    target_estimate = to_vector(time_position);
 /*
     for(c in 1:num_cells) {
-      regulator_estimate[c] = kernel_estimate(time_position[c], to_vector(time_position), regulator_expression, regulator_bandwidth);
+      regulator_estimate[c] = kernel_estimate(time_position[c], to_vector(time_position), regulator_true, regulator_bandwidth);
     }*/
-    //regulator_estimate = true_regulator;
-    regulator_zero = 0;
+    //regulator_estimate = regulator_true;
+    //regulator_zero = 0;
 
+/*
     integral = 0.5 * (regulator_estimate[ordering[1]] + regulator_zero) * time_position[ordering[1]];
     target_estimate[ordering[1]] = integral;
 
@@ -104,22 +114,22 @@ transformed parameters {
         target_estimate[cell_i] = integral;
       }
     }
-
+*/
 
     if(debug > 0) {
       print("Time: ", time_position)
-      print("Ordering: ", ordering)
-      print("Regulaotr: ", regulator_expression)
+      //print("Ordering: ", ordering)
+      //print("Regulaotr: ", regulator_expression)
       //print("RegE: ", regulator_estimate)
-      print("Target: ", target_expression)
-      print("TargetE: ", target_estimate)
+      //print("Target: ", target_expression)
+      //print("TargetE: ", target_estimate)
     }
   }
 
 }
 
 model {
-  regulator_expression ~ normal(regulator_estimate, expression_sigma);
+  regulator_expression ~ normal(regulator_true, expression_sigma);
   target_expression ~ normal(target_estimate, expression_sigma);
   /*
   for(i in 1:num_cells) {
@@ -134,7 +144,8 @@ model {
 
   regulator_true_raw ~ normal(0,1);
 
-  time_position ~ beta(time_shape_1, time_shape_2);
+  //time_position ~ beta(time_shape_1, time_shape_2);
+  time_position ~ beta(time_position_prior_alpha, time_position_prior_beta);
   /*
   dist_bias ~ cauchy(0, 2.5);
   dist_coeff ~ cauchy(1, 2.5);

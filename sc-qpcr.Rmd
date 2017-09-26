@@ -1,0 +1,56 @@
+---
+title: "Temporal dynamics and transcriptional control using single-cell gene expression analysis"
+output: html_notebook
+---
+
+Source of data: https://genomebiology.biomedcentral.com/articles/10.1186/gb-2013-14-10-r118
+
+```{r setup}
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+```
+
+
+```{r}
+data = as.tibble(read.csv("unversioned-data/13059_2013_3531_MOESM3_ESM.csv", stringsAsFactors = FALSE))
+#Need to remove the Excel mess from the cell name column (1-2 got transformed to 02-Jan, 1-40 to Jan-40 and similar fun)
+data %<>% 
+  rename(cell_code = X) %>%
+  mutate(cell_code = gsub("([0-9])*-([A-Za-z]{3})", "\\2-\\1", cell_code)) %>%  #Change 01-Jan to Jan-01 to have consistent order of time and cell no
+  separate(cell_code, c("time","cell_no"), sep ="\\-" ) %>% #Separate time from cell_no
+  mutate(time = as.numeric(if_else(time == "Jan", "1", if_else(time == "Jun", "6", if_else(time == "Dec", "12", time)))), cell_no = as.integer(cell_no))  #get rid of string representations in time
+  
+data_tidy = data %>%
+  gather(gene, expression, -time, -cell_no)
+
+```
+
+Let's sample some genes and see what we've got
+```{r}
+sample_genes = sample(unique(data_tidy$gene), 20)
+
+data_plot = data_tidy %>%
+  filter(gene %in% sample_genes) %>%
+  mutate(ct = ((1 / (expression / 10)) + 34), expression_orig = 1 / (2 ^ ct)) %>%
+  mutate(time = as.factor(time), is_zero = as.integer(expression < 5)) #Threshold of 5 is used in the paper
+
+data_plot %>%
+  ggplot(aes(x = time,y = expression, group = time)) + geom_boxplot(data = data_plot %>% filter(is_zero == 0), outlier.shape =  NA) + 
+    geom_jitter(size = 0.1,alpha = 0.2, color = "blue", position=position_jitter(width=0.2)) +
+    facet_wrap(~  gene, scales = "free", ncol = 4)
+
+data_plot %>%
+  ggplot(aes(x = time,y = expression_orig, group = time)) + geom_boxplot(data = data_plot %>% filter(is_zero == 0), outlier.shape =  NA) + 
+    geom_jitter(size = 0.1,alpha = 0.2, color = "blue", position=position_jitter(width=0.2)) +
+    facet_wrap(~  gene, scales = "free", ncol = 4)
+
+min(data_plot$ct)
+```
+
+This means we cannot take the exact expression values for granted - most of the differences except for the on/off proportion are probably just noise.
+
+```{r}
+data_tidy %>% filter(expression < 5) %>% ggplot(aes(x=expression)) + geom_histogram(binwidth = 0.1)
+```
+

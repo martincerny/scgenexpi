@@ -1,0 +1,75 @@
+---
+title: "Nested observations"
+output: html_notebook
+---
+
+```{r setup}
+library(rstan)
+library(tidyverse)
+library(cowplot)
+rstan_options(auto_write = TRUE)
+#options(mc.cores = parallel::detectCores())
+```
+
+```{r}
+stan_model = "
+data {
+int N;
+vector[N] x_obs;
+vector[N] sum_obs;
+}
+
+parameters {
+real x;
+real y;
+}
+
+model {
+x ~ normal(0,1);
+y ~ normal(0,1);
+x_obs ~ normal(x, 1);
+sum_obs ~ normal(x * y, 1);
+}
+"
+
+rounds = 100
+x_quantiles = numeric(rounds)
+y_quantiles = numeric(rounds)
+
+for(i in 1:rounds) {
+N = 10
+true = list(
+  x = rnorm(1,0,1),
+  y = rnorm(1,0,1)
+  )
+observed = list(
+  x_obs = rnorm(N,true$x ,1),
+  sum_obs = rnorm(N, true$x * true$y, 1)
+)
+
+fit = stan(model_code = stan_model, data = observed)
+
+samples = rstan::extract(fit)
+
+x_quantiles[i] = ecdf(samples$x)(true$x)
+y_quantiles[i] = ecdf(samples$y)(true$y)
+}
+
+mean(x_quantiles > 0.375 & x_quantiles < 0.625)
+mean(x_quantiles > 0.25 & x_quantiles < 0.75)
+mean(x_quantiles > 0.05 & x_quantiles < 0.95)
+
+mean(y_quantiles > 0.375 & y_quantiles < 0.625)
+mean(y_quantiles > 0.25 & y_quantiles < 0.75)
+mean(y_quantiles > 0.05 & y_quantiles < 0.95)
+
+#ggplot(data.frame(x = x_quantiles), aes(x=x)) + geom_histogram(bins = 4)
+#ggplot(data.frame(x = y_quantiles), aes(x=x)) + geom_histogram(bins = 4)
+
+#Shows the posterior draws + a red line at the true value
+#ggplot(data.frame(x_obs = observed$x_obs), aes(x=x_obs)) + geom_histogram(bins = min(N / 20, 50)) + geom_vline(xintercept = true$x, color="red")
+#ggplot(data.frame(x = samples$x), aes(x=x)) + geom_histogram(bins = min(N / 20, 50)) + geom_vline(xintercept = true$x, color="red")
+#ggplot(data.frame(y = samples$y), aes(x=y)) + geom_histogram(bins = min(N / 20, 50)) + geom_vline(xintercept = true$y, color="red")
+
+```
+

@@ -7,6 +7,7 @@ output: html_notebook
 library(rstan)
 library(shinystan)
 library(tidyverse)
+library(ggjoy)
 library(magrittr)
 library(BiocGenerics)
 library(Biobase)
@@ -129,6 +130,25 @@ length(targetGenes)
 
 ```{r}
 tf_counts = exprMat[toupper(inputTFs),]
+
+tf_counts_graphic = tf_counts %>% as.data.frame %>%
+  rownames_to_column("gene") %>%
+  gather(cell,expression, -gene )
+tf_counts_graphic %>% 
+  filter(gene %in% sample(toupper(inputTFs), 20)) %>%
+  filter(expression > 0) %>%
+  ggplot(aes(x= expression, y = gene)) + geom_joy() + geom_joy(stat="binline", fill = "green", fill_alpha = 0.1, alpha = 0.2) + scale_x_log10()
+
+tf_counts_graphic %>% 
+  mutate(expression_na = if_else(expression == 0, as.numeric(NA), expression)) %>%
+  group_by(gene) %>%
+  summarise(zero_proportion = mean(expression == 0), median_expr = median(expression_na, na.rm = TRUE), mean_expr = mean(expression_na, na.rm = TRUE)) %>%
+  gather(method, expression, median_expr, mean_expr) %>%
+  ggplot(aes(y = zero_proportion, x = log10(expression))) + 
+     geom_density2d() + geom_jitter(alpha = 0.3) +
+    facet_wrap(~ method)
+
+tf_zero_prob = mean(tf_counts == 0)
 log_counts = as.array(log(tf_counts))
 log_counts = log_counts[!is.infinite(log_counts)]
 plot(density(log_counts))
@@ -156,6 +176,15 @@ regulator_prior_sigma = 2 * sd(log_counts)
 
 #fit = stan('overall_steady.stan', data = stan_data)
 stan_rdump(c("num_cells","num_regulators","num_targets","regulator_expression","target_expression","w_prior_sigma","regulator_prior_sigma","regulator_prior_mean"), 'unversioned-data/gse36552_stan_input')
+
+regulator_expression_mean = t(regulator_expression) + 0.001
+stan_rdump("regulator_expression_mean",'unversioned-data/gse36552_stan_init')
+
+```
+
+#Collect samples
+```{r}
+samples = read_stan_csv(c("unversioned-data/samples_gse36552/samples_1.csv", "unversioned-data/samples_gse36552/samples_2.csv", "unversioned-data/samples_gse36552/samples_3.csv"))
 
 ```
 

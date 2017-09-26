@@ -21,6 +21,7 @@ parameters {
 transformed parameters {
 }
 
+
 model {
   matrix[num_cells, num_targets] target_expression_mean = regulator_expression_mean * w;// + derivatives_noise;
   //residual ~ normal(0,residual_prior_sigma);
