@@ -1,0 +1,85 @@
+---
+title: "GSE89237"
+output: html_notebook
+---
+
+
+```{r setup}
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r}
+data = as.tibble(read.table('unversioned-data/GSE89237_PRO20150916_C1_dge_ed1.txt',header = TRUE, stringsAsFactors = FALSE))
+```
+
+```{r}
+
+data_tidy = data %>%
+  rename(gene = GENE) %>%
+  gather(cell, count, -gene) 
+
+
+
+```
+
+```{r}
+genes_to_include = data_tidy %>%
+  group_by(gene) %>% summarize(num_expressed = sum(count >= 1)) %>%
+  filter(num_expressed > 30) 
+
+num_genes = length(genes_to_include$gene)
+
+cells_to_include = data_tidy %>%
+  group_by(cell) %>% summarize(num_expressed = sum(count >= 1)) %>%
+  filter(num_expressed > num_genes / 10) 
+
+cells_to_include %>% ggplot(aes(x = num_expressed)) + geom_histogram()
+
+num_cells = length(cells_to_include$cell)
+
+data_tidy = data_tidy %>% filter(cell %in% cells_to_include$cell & gene %in% genes_to_include$gene)
+
+```
+```{r}
+num_plots = 12
+sample_genes = sample(genes_to_include$gene, num_plots)
+
+data_plot = data_tidy %>%
+  filter(gene %in% sample_genes)
+
+density_data = data_plot %>%
+  group_by(gene) %>% summarise(mean = mean(count), variance = var(count), total = sum(count))
+
+data_plot %>% 
+  left_join(density_data, by = "gene") %>%
+  mutate(density = if_else(variance > mean, 
+                           dnbinom(count, mu = mean, size = (mean^2) / (variance - mean)), 
+                           dpois(count, mean)
+                           ),
+         density_type = if_else(variance > mean, 
+                           "nbinom",
+                           "poisson" 
+                           )
+         ) %>%
+  ggplot(aes(x = count)) + geom_density() + 
+    geom_line(aes(y = density, color = density_type)) +
+  facet_wrap(~  gene, scales = "free", ncol = 4)
+
+
+```
+```{r}
+zero_inf_data = data_tidy %>%
+  group_by(gene) %>% summarise(mean = mean(count), variance = var(count), total = sum(count), num_zero = sum(count == 0), num_values = length(count)) %>%
+  mutate(theoretical_density_zero = if_else(variance > mean, 
+                           dnbinom(0, mu = mean, size = (mean^2) / (variance - mean)), 
+                           dpois(0, mean)
+                           ),
+         density_zero = num_zero / num_values
+         ) 
+
+zero_inf_data %>% ggplot(aes(x = density_zero - theoretical_density_zero)) + geom_histogram()
+zero_inf_data %>% summarise(greater_than_theory = sum(density_zero > theoretical_density_zero),
+                            less_than_theory = sum(density_zero < theoretical_density_zero))
+```
+

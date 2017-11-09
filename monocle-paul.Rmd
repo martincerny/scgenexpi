@@ -1,0 +1,96 @@
+---
+title: ""
+output: html_notebook
+---
+
+Code for analysis, modified from: https://github.com/theislab/graph_abstraction/blob/master/paul15/comparison_monocle2/monocle2_original.ipynb
+
+```{r}
+options(warn=-1) # turn off warning message globally 
+suppressMessages(library(monocle))
+suppressMessages(library(plyr))
+suppressMessages(library(dplyr))
+```
+
+
+```{r}
+# this RData is from Maren Büttner (https://github.com/theislab/scAnalysisTutorial)
+load('./unversioned-data/Paul_Cell_MARSseq_GSE72857.RData') 
+# the following code is used to select feature genes used by Maren 
+gene.names <-sapply(strsplit(rownames(data.debatched), ";"), "[", 1)
+is.informative <- gene.names %in% info.genes[order(info.genes)]
+data.info.genes <- data.debatched[is.informative,]
+rownames(data.info.genes) <- gene.names[is.informative]
+```
+
+```{r}
+previous_time <- proc.time()[3]
+################################################################################################################################################
+# obtain this mat file from Ido Amit group  
+MAP_cells_clusters <- read.csv('./unversioned-data/MAP.csv', header = F)
+row.names(MAP_cells_clusters) <- MAP_cells_clusters$V1
+
+#filtering cells to include only the ones which were assigned a cluster id: 
+valid_subset_GSE72857_exprs <- read.table(gzfile('./unversioned-data/GSE72857_umitab.txt.gz'), header = T, row.names = 1)
+design_mat <- read.table(gzfile('./unversioned-data/GSE72857_experimental_design.txt.gz'), header = T, row.names = 1, skip = 19, sep = '\t')
+design_mat$cluster <- MAP_cells_clusters[row.names(design_mat), 'V2']
+valid_design_mat <- subset(design_mat, !is.na(cluster))
+
+# Get the intersect gene used by Maren Büttner and the genes we have 
+common_genes <- rownames(valid_subset_GSE72857_exprs)[rownames(valid_subset_GSE72857_exprs) %in% info.genes]
+fd <- new("AnnotatedDataFrame", data = data.frame(gene_short_name = common_genes, row.names = common_genes))
+pd <- new("AnnotatedDataFrame", data = valid_design_mat)
+
+# create a CDS with data.info.genes 
+valid_subset_GSE72857_cds <- newCellDataSet(as(as.matrix(data.info.genes[common_genes, ]), 'sparseMatrix'), 
+                                            phenoData = pd, 
+                                            featureData = fd,
+                                            lowerDetectionLimit=1,
+                                            expressionFamily=negbinomial.size())
+valid_subset_GSE72857_cds <- estimateSizeFactors(valid_subset_GSE72857_cds)
+valid_subset_GSE72857_cds <- estimateDispersions(valid_subset_GSE72857_cds)
+
+pData(valid_subset_GSE72857_cds)$cell_type <- revalue(as.character(pData(valid_subset_GSE72857_cds)$cluster), 
+                                                      c("1" = 'erythroid', "2" = 'erythroid', "3" = 'erythroid', "4" = 'erythroid', "5" = 'erythroid', "6" = 'erythroid', 
+                                                        "7" = 'CMP', "8" = 'CMP', "9" = 'CMP', "10" = 'CMP',
+                                                        "11" = 'DC', 
+                                                        "12" = 'GMP', "13" = 'GMP', "14" = 'GMP', "15" = 'GMP', "16" = 'GMP', "17" = 'GMP', "18" = 'GMP', 
+                                                        "19" = 'lymphoid'))
+
+# remove all lymphoid cells as they do not belong to myeloid lineage 
+valid_subset_GSE72857_cds <- valid_subset_GSE72857_cds[, pData(valid_subset_GSE72857_cds)$cell_type != 'lymphoid']
+proc.time()[3] - previous_time
+```
+
+```{r}
+previous_time <- proc.time()[3]
+valid_subset_GSE72857_cds2 <- reduceDimension(valid_subset_GSE72857_cds,
+                                              norm_method = 'log', verbose = F, max_components = 10) 
+valid_subset_GSE72857_cds2 <- orderCells(valid_subset_GSE72857_cds2, reverse = T)
+proc.time()[3] - previous_time
+```
+
+
+```{r}
+detailed_cell_type_color <- c("B" = "#E088B8", "DC" = "#46C7EF", "Eos" = "#EFAD1E", "Ery" = "#8CB3DF", "Mo" = "#53C0AD", "MEP" = "#4EB859", "GMP" = "#D097C4", "MK" = "#ACC436", "Neu" = "#F5918A", "lymphoid" = "#FF0000")
+
+pData(valid_subset_GSE72857_cds2)$cell_type2 <- revalue(as.character(pData(valid_subset_GSE72857_cds2)$cluster), 
+                                                        c("1" = 'Ery', "2" = 'Ery', "3" = 'Ery', "4" = 'Ery', "5" = 'Ery', "6" = 'Ery', 
+                                                          "7" = 'MEP', "8" = 'MK', "9" = 'GMP', "10" = 'GMP',
+                                                          "11" = 'DC', 
+                                                          "12" = 'B', "13" = 'B', "14" = 'Mo', "15" = 'Mo', "16" = 'Neu', "17" = 'Neu', "18" = 'Eos', 
+                                                          "19" = 'lymphoid'))
+
+options(repr.plot.width=3, repr.plot.height=4)
+plot_complex_cell_trajectory(valid_subset_GSE72857_cds2, color_by = 'State', show_branch_points = T, 
+                             cell_size = 0.5, cell_link_size = 0.3, root_states = c(11))
+```
+
+```{r}
+options(repr.plot.width=4, repr.plot.height=3)
+plot_complex_cell_trajectory(valid_subset_GSE72857_cds2, color_by = 'as.factor(cell_type2)', show_branch_points = T, 
+                             cell_size = 0.5, cell_link_size = 0.3, root_states = c(11)) + scale_size(range = c(0.2, 0.2)) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  theme (legend.position="left", legend.title=element_blank()) + scale_color_manual(values = detailed_cell_type_color)
+```
+

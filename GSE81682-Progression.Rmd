@@ -1,0 +1,23 @@
+---
+title: "GSE81682 - Progression"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+```
+
+
+```{r}
+data = as.tibble(read.table(gzfile('unversioned-data/GSE81682_HTSeq_counts.txt.gz'), sep = '\t', header = TRUE, stringsAsFactors = FALSE)
+                 )
+```
+
+```{r}
+data_tidy = data %>% rename(gene = ID) %>% gather(key="cell", value ="expression", -gene)
+```
+
+```{r}
+data_tidy %>% filter(gene == "ENSMUSG00000000088") %>% mutate(time = if_else(expression < 1, runif(length(expression), 0,1), expression / max(expression) + rnorm(length(expression), 0, 0.05) ))  %>% ggplot(aes(x = time, y=expression)) + geom_point()
+```
+

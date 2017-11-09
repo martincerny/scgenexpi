@@ -7,6 +7,11 @@ output: html_notebook
 ```{r setup}
 library(tidyverse)
 library(ggplot2)
+library(rstan)
+library(bayesplot)
+library(loo)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
 ```
 
 ```{r}
@@ -79,10 +84,47 @@ sample_time = sample(data_tidy$time_factor, 1)
 data_plot = data_tidy %>%
   filter(gene %in% sample_genes & time_factor == sample_time)
 
-data_plot %>% 
-  ggplot(aes(x = count)) + geom_histogram(bins = 30) + 
-  facet_wrap(~  gene, scales = "free", ncol = 4)
+density_data = data_plot %>%
+  group_by(gene) %>% summarise(mean = mean(count), variance = var(count), total = sum(count), max_dens = max(density(count)$y))
 
+data_plot %>% 
+  ggplot(aes(x = count)) + geom_histogram() +
+    facet_wrap(~  gene, scales = "free", ncol = 4)
+
+data_plot %>% 
+  left_join(density_data, by = "gene") %>%
+  mutate(count = as.integer(count)) %>%
+  mutate(density = if_else(variance > mean, 
+                           dnbinom(count, mu = mean, size = (mean^2) / (variance - mean)), 
+                           dpois(count, mean)
+                           ),
+         density_type = if_else(variance > mean, 
+                           "nbinom",
+                           "poisson" 
+                           )
+         ) %>%
+  mutate(density = if_else(density > max_dens * 1.5, as.double(NA), density)) %>%
+  ggplot(aes(x = count)) + geom_density() + 
+    geom_line(aes(y = density, color = density_type)) +
+    facet_wrap(~  gene, scales = "free", ncol = 4)
+
+```
+```{r}
+zero_inf_data = data_tidy %>%
+  mutate(count = as.integer(count)) %>%
+  group_by(gene, time) %>% summarise(mean = mean(count), variance = var(count), total = sum(count), num_zero = sum(count == 0), num_values = length(count), size = (mean^2) / (variance - mean)) %>%
+  filter(variance > 0) %>%
+  mutate(theoretical_density_zero = if_else(variance > mean * 1.0001, 
+                           dnbinom(0, mu = mean, if_else(size > 1e-5, size, 1e-5)), 
+                           dpois(0, mean)
+                           ),
+         density_zero = num_zero / num_values
+         ) 
+
+
+zero_inf_data %>% ggplot(aes(x = density_zero - theoretical_density_zero)) + geom_histogram()
+zero_inf_data %>% ungroup() %>% summarise(greater_than_theory = sum(density_zero / theoretical_density_zero > 1.05),
+                            less_than_theory = sum(density_zero / theoretical_density_zero < 0.95 ))
 ```
 
 
@@ -99,15 +141,86 @@ gene_time_summary = data_tidy %>%
 mean(gene_time_summary$is_dispersed)
 
 gene_time_summary %>% ungroup() %>%
-  filter(!is.na(dispersion) & !is.infinite(dispersion) & dispersion > 0) %>% summarize(mean_log_disp = mean(log(dispersion)), sd_log_disp = sd(log(dispersion)), mean_inv = mean(dispersion_inv), sd_inv = sd(dispersion_inv))
+  filter(!is.na(dispersion) & !is.infinite(dispersion) & dispersion > 0) %>% 
+  summarize(mean_mean = mean(log(mean_count)),
+            sd_mean = sd(log(mean_count)),
+            mean_log_disp = mean(log(dispersion)), 
+            sd_log_disp = sd(log(dispersion)), 
+            mean_inv = mean(dispersion_inv), 
+            sd_inv = sd(dispersion_inv))
 
 gene_time_summary %>% filter(!is.infinite(dispersion) &!is.na(dispersion) & dispersion > 0) %>% ggplot(aes(x = log(dispersion))) + geom_histogram(bins = 60)
 
 gene_time_summary %>% ggplot(aes(x = (dispersion_inv))) + geom_histogram(bins = 60)
 
+gene_time_summary %>% ggplot(aes(x = (log(mean_count)))) + geom_histogram(bins = 60)
+
 ```
 
 ```{r}
+test_gene = 'FAM46A' #'PTPN14' 'ZNF860'#
+data_nbinom = data_tidy %>% 
+  filter(gene == test_gene) %>%
+  mutate(categories_constant = 1, categories_change = as.integer(time_factor))
 
+data_common = list(
+  num_measurements = length(data_nbinom$count),
+  counts = as.integer(data_nbinom$count),
+  prior_zero_alpha = 2,
+  prior_zero_beta = 2,
+  prior_mean_mean = 3.6,
+  prior_mean_sd = 4,
+  prior_dispersion_rate = 0.3,
+  ignore_dispersion_threshold = 3 #Below that modelled as Poisson, otherwise non-identifiable
+)
+
+data_change = data_common
+data_change$categories = as.integer(data_nbinom$categories_change)
+data_change$num_categories = length(unique(data_change$categories))
+
+fit_change = stan('nbinom.stan', data = data_change )
+
+data_constant = data_common
+data_constant$categories = as.integer(data_nbinom$categories_constant)
+data_constant$num_categories = length(unique(data_constant$categories))
+
+fit_constant = stan('nbinom.stan', data = data_constant)
+
+loo_change = loo(extract_log_lik(fit_change))
+loo_constant = loo(extract_log_lik(fit_constant))
+compare(fit_change, fit_constant )
+```
+
+```{r}
+nbinom_replicate <- function(categories, fit, repeats) {
+  samples = extract(fit)
+  num_samples = dim(samples$zero_prob_ext)[1]
+  num_results = length(categories)
+  result = matrix(0, num_results, repeats)
+  for(i in 1:repeats){
+    sampleID = sample(1:num_samples, 1)
+    
+    counts_zero = rbernoulli(num_results, samples$zero_prob_ext[sampleID, categories])
+
+    while(any(!counts_zero & result[, i] == 0)) {
+      to_replace = (!counts_zero & result[, i] == 0)
+      num_to_replace = sum(to_replace)
+      result[to_replace, i] = rnbinom(num_to_replace, mu = samples$mean_count[sampleID, categories[to_replace]], size = 1 / samples$dispersion_inv[sampleID, categories[to_replace]])
+    }
+  }
+  return(t(result))
+}
+
+counts_rep_change = nbinom_replicate(data_change$categories, fit_change, 500)
+ppc_dens_overlay(log(data_change$counts + 1), log(counts_rep_change + 1), alpha = 0.2)
+
+counts_rep_constant = nbinom_replicate(data_constant$categories, fit_constant, 500)
+ppc_dens_overlay(log(data_constant$counts + 1), log(counts_rep_constant + 1), alpha = 0.2)
+
+for(category in 1:data_change$num_categories) {
+  selector = data_change$categories == category
+  print(ppc_dens_overlay(log(data_change$counts[selector] + 1), log(counts_rep_change[, selector] + 1), alpha = 0.2) + ggtitle(paste0("Category ", category, " - Change")))
+  print(ppc_dens_overlay(log(data_constant$counts[selector] + 1), log(counts_rep_constant[, selector] + 1), alpha = 0.2)  + ggtitle(paste0("Category ", category, " - Constant")))
+}
 ```
 

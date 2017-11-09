@@ -1,5 +1,5 @@
 ---
-title: "Neg. binom model test"
+title: "Neg. binom + PCR model test"
 output: html_notebook
 ---
 
@@ -8,9 +8,35 @@ output: html_notebook
 library(tidyverse)
 library(rstan)
 library(bayesplot)
+library(magrittr)
+library(tibble)
 rstan_options(auto_write = TRUE)
 options(mc.cores = parallel::detectCores())
 ```
+
+
+```{r}
+mu = 1
+dispersion = 1
+amplification_cycles = 25
+amplification_prob = 0.99
+sequencing_prob = 1e-7
+num_samples = 1e4
+simulated = tibble(orig = rnbinom(num_samples, mu = mu, size = dispersion)) %>%
+    mutate(
+           amplified = if_else(orig == 0, as.integer(0), simulate_pcr(orig, 1, amplification_cycles, amplification_prob)$amplified %>% as.integer), 
+           sequenced = rbinom(num_samples, amplified, sequencing_prob))
+
+simulated %>% filter(amplified > 0)  %>% 
+  summarise(mean_amplified = mean(amplified), sd_amplified = sd(amplified))
+
+simulated %>% ggplot(aes(x=orig)) + geom_histogram(binwidth = 1, bins = 30)
+simulated %>% ggplot(aes(x=amplified)) + geom_histogram(bins = 30)
+simulated %>% ggplot(aes(x=sequenced)) + geom_histogram(binwidth=1)#bins = 30)
+
+```
+
+Below so far only copied, non-modified
 
 ```{r}
 num_measurements = 200

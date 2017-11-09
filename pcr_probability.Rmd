@@ -8,37 +8,8 @@ output: html_notebook
 library(ggplot2)
 library(tidyverse)
 library(magrittr)
+library(ggjoy)
 
-density_pcr <- function(x, initial_no, prob_duplicate, n_cycles) {
-  if(initial_no <= 0) {
-    stop("Initial no. has to be positive")
-  }
-  if(any(x <= 0)) {
-    stop("x has to be positive")
-  }
-  
-  #computed_densities = array(-1, c(1:x,1:n_cycles))
-  
-  if(n_cycles == 0) {
-    if(x == initial_no) {
-      return(1);
-    } else {
-      return(0);
-    }
-  } else {
-    if(x < initial_no) {
-      return(0)
-    } else if(x > initial_no * 2 ^ n_cycles) {
-      return(0)
-    }
-    max_duplicated = floor(x / 2)
-    prob = 0
-    for(duplicated in 0:max_duplicated) {
-      prob = prob + dbinom(duplicated, x - duplicated, prob_duplicate) * density_pcr(x - duplicated, initial_no, prob_duplicate, n_cycles - 1)
-    }
-    return(prob)
-  }
-}
 ```
 
 ```{r}
@@ -46,30 +17,37 @@ data = tibble(points = 1:64) %>%
   rowwise() %>%
   mutate(density = density_pcr(points, 1, 0.5, 7))
 
+#binom_n
+
 data %>%
   ggplot(aes(x = points, y = density)) + geom_col()
 ```
 
+
 ```{r}
-pcr_state = tibble(init = c(1:10,seq(20, 100, by = 10), seq(200,1000, by = 100))) %>%
-  mutate(amplified = init)
+counts_to_test = c(1,2,3,4,5,6,7,8,9,10)
+num_cycles = 20
+amplify_prob = 0.99
+num_samples = 1000
+
+simulated = simulate_pcr(counts_to_test, num_samples, num_cycles, amplify_prob)
+simulated %>% ggplot(aes(x = amplified)) + geom_histogram(bins = 30) + facet_wrap( ~ init, scales = "free")
+simulated %>% ggplot(aes(x = amplified, y = as.factor(init))) + geom_joy()
+  #avg = sum(data$points * data$density) / sum(data$density) 
+  #variance = sum( ((data$points - avg) ^ 2) * data$density) / sum(data$density) 
+
+
+```
+
+
+```{r}
 
 num_cycles = 10
 amplify_prob = 0.5
 num_samples = 100
-result = NULL
+init = c(1:10,seq(20, 100, by = 10))
 
-for(s in 1:num_samples) {
-  for(i in 1:num_cycles) {
-    pcr_state %<>% mutate(amplified = amplified + rbinom(length(amplified), amplified, amplify_prob))
-  }
-  if(is.null(result)) {
-    result = pcr_state
-  } else {
-    result = rbind(result, pcr_state)
-  }
-  pcr_state %<>% mutate(amplified = init)
-}
+result = simulate_pcr(init, num_samples, num_cycles, amplify_prob)
 
 result_copy = result %>% transmute(init2 = init, amplified2 = amplified)
 result %>% expand(result, result_copy) %>% 
